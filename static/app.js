@@ -61,7 +61,11 @@ async function loadMe() {
   document.querySelector('#profile-name').textContent = data.user.first_name || data.user.username || 'Telegram user';
   document.querySelector('#balance-value').textContent = money(data.wallet.balance);
   document.querySelector('.admin-only').hidden = !data.user.is_admin;
-  status('Готово');
+  if (data.user.is_admin) {
+    status(`Admin mode: on · tg_id ${data.admin_debug?.tg_id || data.user.tg_id}`);
+  } else {
+    status(`Admin mode: off · tg_id ${data.admin_debug?.tg_id || data.user.tg_id} · ADMIN ids: ${data.admin_debug?.admin_ids_configured ?? 0}`);
+  }
 }
 
 async function loadEvents() {

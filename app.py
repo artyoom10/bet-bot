@@ -7,7 +7,7 @@ from flask import Flask, jsonify, render_template, request
 
 from lib.admin_auth import require_admin
 from lib.bets import get_user_bets, place_bet
-from lib.config import app_name
+from lib.config import admin_tg_ids, app_name
 from lib.errors import AppError, error_response
 from lib.events import get_events_for_app
 from lib.odds_sync import refresh_odds_usage, run_odds_sync
@@ -55,6 +55,12 @@ def api_me():
             "ok": True,
             "user": public_user(user),
             "wallet": public_wallet(wallet),
+            "admin_debug": {
+                "tg_id": str(user["tg_id"]),
+                "is_admin_from_db": bool(user.get("is_admin")),
+                "matched_admin_env": str(user["tg_id"]) in admin_tg_ids(),
+                "admin_ids_configured": len(admin_tg_ids()),
+            },
         }
     )
 
