@@ -16,7 +16,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -223,6 +224,43 @@ h2 {
   background: #10140e;
 }
 
+.user-edit,
+.modal-body {
+  display: grid;
+  gap: 12px;
+}
+
+.user-edit label,
+.modal-body label {
+  display: grid;
+  gap: 8px;
+  color: #c9c5b8;
+}
+
+.user-edit input,
+.user-edit select,
+.modal-body input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: #f6f3ea;
+  background: #10140e;
+}
+
+.checkbox-row {
+  display: flex !important;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.checkbox-row input {
+  width: auto;
+  min-height: auto;
+}
+
 #place-bet {
   width: 100%;
 }
@@ -238,6 +276,43 @@ h2 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.62);
+  z-index: 10;
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.modal-body {
+  width: min(420px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 18px;
+  background: #1c2319;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal-head button {
+  min-height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: #f6f3ea;
+  background: #293022;
 }
 
 .stat,

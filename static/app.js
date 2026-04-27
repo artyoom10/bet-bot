@@ -6,6 +6,7 @@ const state = {
   me: null,
   events: [],
   bets: [],
+  users: [],
   selected: null,
   stake: 100,
 };
@@ -60,7 +61,9 @@ async function loadMe() {
   state.me = data;
   document.querySelector('#profile-name').textContent = data.user.first_name || data.user.username || 'Telegram user';
   document.querySelector('#balance-value').textContent = money(data.wallet.balance);
-  document.querySelector('.admin-only').hidden = !data.user.is_admin;
+  document.querySelectorAll('.admin-only').forEach((item) => {
+    item.hidden = !data.user.is_admin;
+  });
   renderAdminDebug(data.admin_debug);
   if (data.user.is_admin) {
     status('Admin mode: on');
@@ -228,6 +231,11 @@ async function loadAdmin() {
   renderSyncRuns(runs);
 }
 
+async function loadUsers() {
+  state.users = await apiFetch('/api/admin/users');
+  renderUsers();
+}
+
 function renderDashboard(data) {
   const usage = data.odds_api_usage || {};
   const sync = data.last_sync || {};
@@ -260,7 +268,10 @@ function renderSyncRuns(runs) {
 async function syncOdds() {
   status('Синхронизация запущена...');
   const result = await apiFetch('/api/admin/sync-odds', { method: 'POST', body: JSON.stringify({}) });
-  status(`Sync: ${result.sync.status}, событий: ${result.sync.events_count}, кэфов: ${result.sync.odds_count}`);
+  const firstError = result.sync.errors?.[0]?.message;
+  status(firstError
+    ? `Sync: ${result.sync.status}. Ошибка: ${firstError}`
+    : `Sync: ${result.sync.status}, событий: ${result.sync.events_count}, кэфов: ${result.sync.odds_count}`);
   await loadEvents();
   await loadAdmin();
 }
@@ -278,6 +289,90 @@ function switchTab(tab) {
 
   if (tab === 'bets') loadBets().catch((error) => status(error.message));
   if (tab === 'admin') loadAdmin().catch((error) => status(error.message));
+  if (tab === 'users') loadUsers().catch((error) => status(error.message));
+}
+
+function renderUsers() {
+  const root = document.querySelector('#admin-users');
+  if (!state.users.length) {
+    root.innerHTML = '<article class="panel muted">Пользователей пока нет.</article>';
+    return;
+  }
+
+  root.innerHTML = state.users.map(({ user, wallet }) => `
+    <article class="event user-card" data-user-card="${user.id}">
+      <div class="meta">
+        <span>${escapeHtml(user.tg_id)}</span>
+        <span>${user.is_admin ? 'admin' : 'user'}</span>
+      </div>
+      <h2>${escapeHtml([user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || 'Без имени')}</h2>
+      <div class="user-edit">
+        <label>
+          Статус
+          <select data-user-status="${user.id}">
+            ${['new', 'active', 'vip', 'test', 'restricted', 'suspended'].map((status) => `
+              <option value="${status}" ${status === user.client_status ? 'selected' : ''}>${status}</option>
+            `).join('')}
+          </select>
+        </label>
+        <label>
+          Баланс
+          <input data-user-balance="${user.id}" type="number" min="0" step="10" value="${Number(wallet?.balance || 0)}">
+        </label>
+        <label class="checkbox-row">
+          <input data-user-blocked="${user.id}" type="checkbox" ${user.is_blocked ? 'checked' : ''}>
+          Заблокирован
+        </label>
+        <button class="primary" data-save-user="${user.id}">Сохранить</button>
+      </div>
+    </article>
+  `).join('');
+
+  document.querySelectorAll('[data-save-user]').forEach((button) => {
+    button.addEventListener('click', () => saveUser(button.dataset.saveUser));
+  });
+}
+
+async function saveUser(userId) {
+  const payload = {
+    client_status: document.querySelector(`[data-user-status="${userId}"]`).value,
+    balance: Number(document.querySelector(`[data-user-balance="${userId}"]`).value),
+    is_blocked: document.querySelector(`[data-user-blocked="${userId}"]`).checked,
+  };
+
+  await apiFetch(`/api/admin/users/${userId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  status('Пользователь обновлен');
+  await loadUsers();
+  await loadAdmin().catch(() => {});
+}
+
+function openCreateUserModal() {
+  document.querySelector('#create-user-modal').hidden = false;
+}
+
+function closeCreateUserModal() {
+  document.querySelector('#create-user-modal').hidden = true;
+  document.querySelector('#create-user-form').reset();
+}
+
+async function createUser(event) {
+  event.preventDefault();
+  const formData = new FormData(event.currentTarget);
+  await apiFetch('/api/admin/users', {
+    method: 'POST',
+    body: JSON.stringify({
+      first_name: formData.get('first_name'),
+      last_name: formData.get('last_name'),
+      balance: Number(formData.get('balance')),
+    }),
+  });
+  closeCreateUserModal();
+  status('Пользователь создан');
+  await loadUsers();
+  await loadAdmin().catch(() => {});
 }
 
 function formatDate(value) {
@@ -318,6 +413,14 @@ document.querySelector('#sync-odds').addEventListener('click', () => {
 
 document.querySelector('#refresh-usage').addEventListener('click', () => {
   refreshUsage().catch((error) => status(error.message));
+});
+
+document.querySelector('#open-create-user').addEventListener('click', openCreateUserModal);
+
+document.querySelector('#close-create-user').addEventListener('click', closeCreateUserModal);
+
+document.querySelector('#create-user-form').addEventListener('submit', (event) => {
+  createUser(event).catch((error) => status(error.message));
 });
 
 init();

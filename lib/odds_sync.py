@@ -11,6 +11,25 @@ from lib.team_mapping import find_team_by_raw_name, resolve_selection_name_ru
 from lib.users import first
 
 
+SPORT_TITLES = {
+    "soccer_russia_premier_league": {
+        "title_en": "Premier League - Russia",
+        "title_ru": "Российская Премьер-Лига",
+        "group_name": "Soccer",
+    },
+    "soccer_spain_la_liga": {
+        "title_en": "La Liga - Spain",
+        "title_ru": "Ла Лига",
+        "group_name": "Soccer",
+    },
+    "soccer_uefa_champs_league": {
+        "title_en": "UEFA Champions League",
+        "title_ru": "Лига чемпионов",
+        "group_name": "Soccer",
+    },
+}
+
+
 def run_odds_sync(
     db: SupabaseRestClient,
     *,
@@ -33,6 +52,9 @@ def run_odds_sync(
     if active:
         raise AppError("sync_already_running", "Синхронизация уже запущена. Подождите несколько минут.", 409)
 
+    selected_sports = sport_keys or SPORT_KEYS
+    ensure_sports_seed(db, selected_sports)
+
     sync_run = first(
         db.insert(
             "sync_runs",
@@ -46,7 +68,6 @@ def run_odds_sync(
     if not sync_run:
         raise AppError("sync_run_create_failed", "Could not create sync run", 500)
 
-    selected_sports = sport_keys or SPORT_KEYS
     totals = {
         "sports_count": len(selected_sports),
         "success_sports": 0,
@@ -220,6 +241,26 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
     return counts
 
 
+def ensure_sports_seed(db: SupabaseRestClient, sport_keys: list[str]) -> None:
+    rows = []
+    for sport_key in sport_keys:
+        title = SPORT_TITLES.get(
+            sport_key,
+            {"title_en": sport_key, "title_ru": sport_key, "group_name": "Soccer"},
+        )
+        rows.append(
+            {
+                "sport_key": sport_key,
+                "title_en": title["title_en"],
+                "title_ru": title["title_ru"],
+                "group_name": title["group_name"],
+                "is_enabled": True,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+    db.upsert("sports", rows, "sport_key")
+
+
 def refresh_odds_usage(db: SupabaseRestClient, admin_user: dict[str, Any]) -> dict[str, Any]:
     usage = fetch_usage()
     row = first(db.insert("odds_api_usage", usage))
@@ -245,14 +286,17 @@ def log_admin_action(
     target_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> None:
-    db.insert(
-        "admin_logs",
-        {
-            "admin_user_id": admin_user.get("id"),
-            "admin_tg_id": admin_user.get("tg_id"),
-            "action": action,
-            "target_type": target_type,
-            "target_id": target_id,
-            "metadata": metadata or {},
-        },
-    )
+    try:
+        db.insert(
+            "admin_logs",
+            {
+                "admin_user_id": admin_user.get("id"),
+                "admin_tg_id": admin_user.get("tg_id"),
+                "action": action,
+                "target_type": target_type,
+                "target_id": target_id,
+                "metadata": metadata or {},
+            },
+        )
+    except Exception:
+        return

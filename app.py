@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 
 from lib.admin_auth import require_admin
+from lib.admin_users import create_admin_user, list_admin_users, update_admin_user
 from lib.bets import get_user_bets, place_bet
 from lib.config import admin_tg_ids, app_name
 from lib.errors import AppError, error_response
@@ -220,6 +221,29 @@ def api_admin_sync_run(sync_run_id: str):
     if not run:
         raise AppError("sync_run_not_found", "Sync run not found", 404)
     return jsonify({"ok": True, "sync_run": run})
+
+
+@app.get("/api/admin/users")
+def api_admin_users():
+    db = get_db()
+    require_admin(request, db)
+    return jsonify(list_admin_users(db))
+
+
+@app.post("/api/admin/users")
+def api_admin_create_user():
+    db = get_db()
+    admin_user = require_admin(request, db)
+    payload = request.get_json(silent=True) or {}
+    return jsonify({"ok": True, **create_admin_user(db, admin_user, payload)})
+
+
+@app.patch("/api/admin/users/<user_id>")
+def api_admin_update_user(user_id: str):
+    db = get_db()
+    admin_user = require_admin(request, db)
+    payload = request.get_json(silent=True) or {}
+    return jsonify({"ok": True, **update_admin_user(db, admin_user, user_id, payload)})
 
 
 @app.post("/webhook")

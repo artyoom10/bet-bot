@@ -24,6 +24,7 @@
         <button class="tab active" data-tab="events">Линия</button>
         <button class="tab" data-tab="bets">Мои ставки</button>
         <button class="tab admin-only" data-tab="admin" hidden>Админка</button>
+        <button class="tab admin-only" data-tab="users" hidden>Пользователи</button>
       </nav>
 
       <section class="status" id="status">Инициализация приложения...</section>
@@ -75,7 +76,36 @@
           </article>
         </div>
       </section>
+
+      <section class="view" id="view-users">
+        <div class="admin-actions">
+          <button class="primary" id="open-create-user">Добавить пользователя</button>
+        </div>
+        <div class="grid" id="admin-users"></div>
+      </section>
     </main>
+
+    <div class="modal" id="create-user-modal" hidden>
+      <form class="modal-body" id="create-user-form">
+        <div class="modal-head">
+          <h2>Добавить пользователя</h2>
+          <button type="button" id="close-create-user">Закрыть</button>
+        </div>
+        <label>
+          Имя
+          <input name="first_name" required autocomplete="off">
+        </label>
+        <label>
+          Фамилия
+          <input name="last_name" autocomplete="off">
+        </label>
+        <label>
+          Баланс DEMO
+          <input name="balance" type="number" min="0" step="10" value="1000" required>
+        </label>
+        <button class="primary" type="submit">Создать</button>
+      </form>
+    </div>
 
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
