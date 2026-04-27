@@ -4,9 +4,12 @@ tg?.expand();
 
 const state = {
   me: null,
+  sports: [],
+  activeSport: '',
   events: [],
   bets: [],
   users: [],
+  aliases: null,
   selected: null,
   stake: 100,
 };
@@ -50,6 +53,7 @@ async function init() {
   }
 
   try {
+    await loadSports();
     await loadEvents();
   } catch (error) {
     status(`Линия не загружена: ${error.message}`);
@@ -65,11 +69,7 @@ async function loadMe() {
     item.hidden = !data.user.is_admin;
   });
   renderAdminDebug(data.admin_debug);
-  if (data.user.is_admin) {
-    status('Admin mode: on');
-  } else {
-    status('Admin mode: off');
-  }
+  status(data.user.is_admin ? 'Admin mode: on' : 'Admin mode: off');
 }
 
 function renderAdminDebug(debug) {
@@ -78,33 +78,42 @@ function renderAdminDebug(debug) {
 
   root.hidden = false;
   root.innerHTML = `
-    <div class="debug-row">
-      <span>Мой tg_id</span>
-      <strong>${escapeHtml(debug.tg_id)}</strong>
-    </div>
-    <div class="debug-row">
-      <span>Админов в env</span>
-      <strong>${debug.admin_ids_configured}</strong>
-    </div>
-    <div class="debug-row">
-      <span>Совпал с ADMIN_TELEGRAM_IDS</span>
-      <strong>${debug.matched_admin_env ? 'да' : 'нет'}</strong>
-    </div>
-    <div class="debug-row">
-      <span>Админ итог</span>
-      <strong>${debug.is_admin_final ? 'да' : 'нет'}</strong>
-    </div>
-    ${debug.profile_loaded ? '' : `
-      <div class="debug-row">
-        <span>Профиль Supabase</span>
-        <strong>не нужен для env-админа</strong>
-      </div>
-    `}
+    <div class="debug-row"><span>Мой tg_id</span><strong>${escapeHtml(debug.tg_id)}</strong></div>
+    <div class="debug-row"><span>Админов в env</span><strong>${debug.admin_ids_configured}</strong></div>
+    <div class="debug-row"><span>Совпал с ADMIN_TELEGRAM_IDS</span><strong>${debug.matched_admin_env ? 'да' : 'нет'}</strong></div>
+    <div class="debug-row"><span>Админ итог</span><strong>${debug.is_admin_final ? 'да' : 'нет'}</strong></div>
   `;
 }
 
+async function loadSports() {
+  state.sports = await apiFetch('/api/sports');
+  renderSports();
+}
+
+function renderSports() {
+  const root = document.querySelector('#sports');
+  const total = state.sports.reduce((sum, sport) => sum + Number(sport.events_count || 0), 0);
+  const items = [{ sport_key: '', title: 'Все', events_count: total }, ...state.sports];
+
+  root.innerHTML = items.map((sport) => `
+    <button class="sport-chip ${state.activeSport === sport.sport_key ? 'active' : ''}" data-sport="${sport.sport_key}">
+      <span>${escapeHtml(sport.title)}</span>
+      <strong>${sport.events_count}</strong>
+    </button>
+  `).join('');
+
+  document.querySelectorAll('[data-sport]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      state.activeSport = button.dataset.sport;
+      renderSports();
+      await loadEvents();
+    });
+  });
+}
+
 async function loadEvents() {
-  state.events = await apiFetch('/api/events');
+  const query = state.activeSport ? `?sport_key=${encodeURIComponent(state.activeSport)}` : '';
+  state.events = await apiFetch(`/api/events${query}`);
   renderEvents();
 }
 
@@ -116,27 +125,22 @@ async function loadBets() {
 function renderEvents() {
   const root = document.querySelector('#events');
   if (!state.events.length) {
-    root.innerHTML = '<article class="panel muted">Пока нет активных событий. Админ может обновить линию в админке.</article>';
+    const league = state.activeSport
+      ? state.sports.find((sport) => sport.sport_key === state.activeSport)?.title || state.activeSport
+      : 'выбранных турниров';
+    root.innerHTML = `<article class="empty-state">Нет активных событий для ${escapeHtml(league)}. Если это Лига чемпионов, Odds API мог не вернуть ближайшие prematch-матчи с коэффициентами.</article>`;
     return;
   }
 
-  root.innerHTML = state.events.map((event) => `
-    <article class="event">
-      <div class="meta">
-        <span>${escapeHtml(event.league_title)}</span>
-        <time>${formatDate(event.commence_time)}</time>
+  const groups = groupBy(state.events, (event) => event.league_title);
+  root.innerHTML = Object.entries(groups).map(([league, events]) => `
+    <section class="league-block">
+      <div class="league-head">
+        <strong>${escapeHtml(league)}</strong>
+        <span>${events.length}</span>
       </div>
-      <h2>${escapeHtml(event.home_team.name)} — ${escapeHtml(event.away_team.name)}</h2>
-      <p class="muted">${escapeHtml(event.odds.bookmaker_title)}</p>
-      <div class="odds">
-        ${event.odds.outcomes.map((outcome) => `
-          <button data-event="${event.id}" data-bookmaker="${event.odds.bookmaker_key}" data-market="${event.odds.market_key}" data-selection="${outcome.selection_key}">
-            <span>${labels[outcome.selection_key] || outcome.label}</span>
-            <strong>${Number(outcome.price).toFixed(2)}</strong>
-          </button>
-        `).join('')}
-      </div>
-    </article>
+      ${events.map(renderEvent).join('')}
+    </section>
   `).join('');
 
   document.querySelectorAll('[data-event]').forEach((button) => {
@@ -144,24 +148,64 @@ function renderEvents() {
   });
 }
 
+function renderEvent(event) {
+  return `
+    <article class="event-row">
+      <div class="event-info">
+        <time>${formatDate(event.commence_time)}</time>
+        <strong>${escapeHtml(event.home_team.name)}</strong>
+        <strong>${escapeHtml(event.away_team.name)}</strong>
+        <span>${escapeHtml(event.odds.bookmaker_title)}</span>
+      </div>
+      <div class="market-row">
+        ${event.odds.outcomes.map((outcome) => {
+          const active = state.selected?.event.id === event.id && state.selected?.outcome.selection_key === outcome.selection_key;
+          return `
+            <button class="odd-cell ${active ? 'active' : ''}" data-event="${event.id}" data-bookmaker="${event.odds.bookmaker_key}" data-market="${event.odds.market_key}" data-selection="${outcome.selection_key}">
+              <span>${labels[outcome.selection_key] || outcome.label}</span>
+              <strong>${Number(outcome.price).toFixed(2)}</strong>
+            </button>
+          `;
+        }).join('')}
+      </div>
+    </article>
+  `;
+}
+
 function selectOutcome(button) {
   const event = state.events.find((item) => item.id === button.dataset.event);
   const outcome = event.odds.outcomes.find((item) => item.selection_key === button.dataset.selection);
+  const sameSelection = state.selected
+    && state.selected.event.id === event.id
+    && state.selected.outcome.selection_key === outcome.selection_key;
+
+  if (sameSelection) {
+    clearSelection();
+    return;
+  }
+
   state.selected = {
     event,
     outcome,
     bookmaker_key: button.dataset.bookmaker,
     market_key: button.dataset.market,
   };
-
-  document.querySelectorAll('[data-event]').forEach((item) => item.classList.remove('active'));
-  button.classList.add('active');
+  renderEvents();
   renderTicket();
+}
+
+function clearSelection() {
+  state.selected = null;
+  document.querySelector('#ticket-empty').hidden = false;
+  document.querySelector('#ticket-form').hidden = true;
+  document.querySelector('#bet-slip').classList.remove('has-selection');
+  renderEvents();
 }
 
 function renderTicket() {
   if (!state.selected) return;
 
+  document.querySelector('#bet-slip').classList.add('has-selection');
   document.querySelector('#ticket-empty').hidden = true;
   document.querySelector('#ticket-form').hidden = false;
   document.querySelector('#ticket-event').textContent = `${state.selected.event.home_team.name} — ${state.selected.event.away_team.name}`;
@@ -189,32 +233,27 @@ async function submitBet() {
   document.querySelector('#balance-value').textContent = money(result.wallet.balance);
   status('Ставка принята');
   tg?.HapticFeedback?.notificationOccurred('success');
+  clearSelection();
   await loadBets();
 }
 
 function renderBets() {
   const root = document.querySelector('#bets');
   if (!state.bets.length) {
-    root.innerHTML = '<article class="panel muted">У вас пока нет ставок.</article>';
+    root.innerHTML = '<article class="empty-state">У вас пока нет ставок.</article>';
     return;
   }
 
   root.innerHTML = state.bets.map((bet) => {
     const selection = bet.selections?.[0] || {};
     return `
-      <article class="event">
-        <div class="meta">
-          <span>${escapeHtml(bet.status)}</span>
-          <time>${formatDate(bet.created_at)}</time>
+      <article class="bet-row">
+        <div>
+          <strong>${escapeHtml(selection.event_name_ru || 'Ставка')}</strong>
+          <p>${escapeHtml(selection.selection_name_ru || selection.selection_name_raw || '')} · ${Number(bet.total_odds).toFixed(2)}</p>
         </div>
-        <h2>${escapeHtml(selection.event_name_ru || 'Ставка')}</h2>
-        <p class="muted">${escapeHtml(selection.selection_name_ru || selection.selection_name_raw || '')} · ${Number(bet.total_odds).toFixed(2)}</p>
-        <div class="ticket-row">
-          <span>Сумма</span>
-          <strong>${money(bet.amount)}</strong>
-        </div>
-        <div class="ticket-row">
-          <span>Возможный выигрыш</span>
+        <div>
+          <span>${money(bet.amount)}</span>
           <strong>${money(bet.possible_win)}</strong>
         </div>
       </article>
@@ -234,6 +273,11 @@ async function loadAdmin() {
 async function loadUsers() {
   state.users = await apiFetch('/api/admin/users');
   renderUsers();
+}
+
+async function loadAliases() {
+  state.aliases = await apiFetch('/api/admin/aliases');
+  renderAliases();
 }
 
 function renderDashboard(data) {
@@ -272,6 +316,7 @@ async function syncOdds() {
   status(firstError
     ? `Sync: ${result.sync.status}. Ошибка: ${firstError}`
     : `Sync: ${result.sync.status}, событий: ${result.sync.events_count}, кэфов: ${result.sync.odds_count}`);
+  await loadSports();
   await loadEvents();
   await loadAdmin();
 }
@@ -282,31 +327,20 @@ async function refreshUsage() {
   await loadAdmin();
 }
 
-function switchTab(tab) {
-  document.querySelectorAll('.tab').forEach((button) => button.classList.toggle('active', button.dataset.tab === tab));
-  document.querySelectorAll('.view').forEach((view) => view.classList.remove('active'));
-  document.querySelector(`#view-${tab}`).classList.add('active');
-
-  if (tab === 'bets') loadBets().catch((error) => status(error.message));
-  if (tab === 'admin') loadAdmin().catch((error) => status(error.message));
-  if (tab === 'users') loadUsers().catch((error) => status(error.message));
-}
-
 function renderUsers() {
   const root = document.querySelector('#admin-users');
   if (!state.users.length) {
-    root.innerHTML = '<article class="panel muted">Пользователей пока нет.</article>';
+    root.innerHTML = '<article class="empty-state">Пользователей пока нет.</article>';
     return;
   }
 
   root.innerHTML = state.users.map(({ user, wallet }) => `
-    <article class="event user-card" data-user-card="${user.id}">
-      <div class="meta">
+    <article class="admin-card">
+      <div class="card-head">
+        <strong>${escapeHtml([user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || 'Без имени')}</strong>
         <span>${escapeHtml(user.tg_id)}</span>
-        <span>${user.is_admin ? 'admin' : 'user'}</span>
       </div>
-      <h2>${escapeHtml([user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || 'Без имени')}</h2>
-      <div class="user-edit">
+      <div class="form-grid">
         <label>
           Статус
           <select data-user-status="${user.id}">
@@ -349,6 +383,161 @@ async function saveUser(userId) {
   await loadAdmin().catch(() => {});
 }
 
+function renderAliases() {
+  const data = state.aliases;
+  renderUnknownAliases(data.unknown_teams || []);
+  renderSportAliases(data.sports || []);
+  renderTeamAliases(data.teams || []);
+}
+
+function renderUnknownAliases(unknown) {
+  const root = document.querySelector('#unknown-aliases');
+  if (!unknown.length) {
+    root.innerHTML = '<p class="muted">Нет пустых команд.</p>';
+    return;
+  }
+
+  root.innerHTML = unknown.map((item, index) => `
+    <article class="admin-card alias-card">
+      <div class="card-head">
+        <strong>${escapeHtml(item.raw_name)}</strong>
+        <span>${escapeHtml(item.sport_key)}</span>
+      </div>
+      <div class="form-grid">
+        <input data-unknown-name="${index}" placeholder="Название на русском">
+        <input data-unknown-short="${index}" placeholder="Короткое название">
+        <button class="primary" data-create-alias="${index}">Создать алиас</button>
+      </div>
+    </article>
+  `).join('');
+
+  document.querySelectorAll('[data-create-alias]').forEach((button) => {
+    button.addEventListener('click', () => createAlias(Number(button.dataset.createAlias)));
+  });
+}
+
+function renderSportAliases(sports) {
+  const root = document.querySelector('#sport-aliases');
+  if (!sports.length) {
+    root.innerHTML = '<p class="muted">Турниры появятся после sync.</p>';
+    return;
+  }
+
+  root.innerHTML = sports.map((sport) => `
+    <article class="admin-card">
+      <div class="card-head">
+        <strong>${escapeHtml(sport.sport_key)}</strong>
+        <span>${sport.is_enabled ? 'active' : 'off'}</span>
+      </div>
+      <div class="form-grid">
+        <input data-sport-title="${sport.sport_key}" value="${escapeAttr(sport.title_ru || '')}" placeholder="Название на русском">
+        <button class="primary" data-save-sport="${sport.sport_key}">Сохранить</button>
+      </div>
+    </article>
+  `).join('');
+
+  document.querySelectorAll('[data-save-sport]').forEach((button) => {
+    button.addEventListener('click', () => saveSport(button.dataset.saveSport));
+  });
+}
+
+function renderTeamAliases(teams) {
+  const root = document.querySelector('#team-aliases');
+  if (!teams.length) {
+    root.innerHTML = '<p class="muted">Команды появятся после заполнения алиасов.</p>';
+    return;
+  }
+
+  root.innerHTML = teams.map(({ team, aliases }) => `
+    <article class="admin-card">
+      <div class="card-head">
+        <strong>${escapeHtml(team.name_en)}</strong>
+        <span>${escapeHtml((aliases || []).map((alias) => alias.raw_name).join(', '))}</span>
+      </div>
+      <div class="form-grid">
+        <input data-team-name="${team.id}" value="${escapeAttr(team.name_ru || '')}" placeholder="Название на русском">
+        <input data-team-short="${team.id}" value="${escapeAttr(team.short_name_ru || '')}" placeholder="Короткое название">
+        <input data-team-logo="${team.id}" value="${escapeAttr(team.logo_url || '')}" placeholder="Logo URL">
+        <button class="primary" data-save-team="${team.id}">Сохранить</button>
+      </div>
+    </article>
+  `).join('');
+
+  document.querySelectorAll('[data-save-team]').forEach((button) => {
+    button.addEventListener('click', () => saveTeam(button.dataset.saveTeam));
+  });
+}
+
+async function createAlias(index) {
+  const item = state.aliases.unknown_teams[index];
+  await apiFetch('/api/admin/team-aliases', {
+    method: 'POST',
+    body: JSON.stringify({
+      raw_name: item.raw_name,
+      sport_key: item.sport_key,
+      name_ru: document.querySelector(`[data-unknown-name="${index}"]`).value,
+      short_name_ru: document.querySelector(`[data-unknown-short="${index}"]`).value,
+    }),
+  });
+  status('Алиас создан');
+  await loadAliases();
+}
+
+async function saveSport(sportKey) {
+  await apiFetch(`/api/admin/sports/${encodeURIComponent(sportKey)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title_ru: document.querySelector(`[data-sport-title="${sportKey}"]`).value }),
+  });
+  status('Турнир обновлен');
+  await loadAliases();
+  await loadSports().catch(() => {});
+}
+
+async function saveTeam(teamId) {
+  await apiFetch(`/api/admin/teams/${teamId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      name_ru: document.querySelector(`[data-team-name="${teamId}"]`).value,
+      short_name_ru: document.querySelector(`[data-team-short="${teamId}"]`).value,
+      logo_url: document.querySelector(`[data-team-logo="${teamId}"]`).value,
+    }),
+  });
+  status('Команда обновлена');
+  await loadAliases();
+  await loadEvents().catch(() => {});
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach((button) => button.classList.toggle('active', button.dataset.tab === tab));
+  document.querySelectorAll('.view').forEach((view) => view.classList.remove('active'));
+  document.querySelector(`#view-${tab}`).classList.add('active');
+
+  if (tab === 'bets') loadBets().catch((error) => status(error.message));
+}
+
+function switchAdminView(view) {
+  document.querySelectorAll('.drawer-tab').forEach((button) => button.classList.toggle('active', button.dataset.adminView === view));
+  document.querySelectorAll('.drawer-view').forEach((item) => item.classList.remove('active'));
+  document.querySelector(`#admin-view-${view}`).classList.add('active');
+
+  if (view === 'overview') loadAdmin().catch((error) => status(error.message));
+  if (view === 'users') loadUsers().catch((error) => status(error.message));
+  if (view === 'aliases') loadAliases().catch((error) => status(error.message));
+}
+
+function openAdminDrawer() {
+  document.querySelector('#admin-drawer').classList.add('open');
+  document.querySelector('#admin-drawer').setAttribute('aria-hidden', 'false');
+  document.querySelector('#admin-backdrop').hidden = false;
+  switchAdminView('overview');
+}
+
+function closeAdminDrawer() {
+  document.querySelector('#admin-drawer').classList.remove('open');
+  document.querySelector('#admin-drawer').setAttribute('aria-hidden', 'true');
+  document.querySelector('#admin-backdrop').hidden = true;
+}
+
 function openCreateUserModal() {
   document.querySelector('#create-user-modal').hidden = false;
 }
@@ -364,6 +553,8 @@ async function createUser(event) {
   await apiFetch('/api/admin/users', {
     method: 'POST',
     body: JSON.stringify({
+      tg_id: formData.get('tg_id'),
+      username: formData.get('username'),
       first_name: formData.get('first_name'),
       last_name: formData.get('last_name'),
       balance: Number(formData.get('balance')),
@@ -373,6 +564,33 @@ async function createUser(event) {
   status('Пользователь создан');
   await loadUsers();
   await loadAdmin().catch(() => {});
+}
+
+function setupSwipe() {
+  let startX = 0;
+  let startY = 0;
+  document.addEventListener('touchstart', (event) => {
+    startX = event.touches[0].clientX;
+    startY = event.touches[0].clientY;
+  }, { passive: true });
+
+  document.addEventListener('touchend', (event) => {
+    const touch = event.changedTouches[0];
+    const dx = touch.clientX - startX;
+    const dy = touch.clientY - startY;
+    if (Math.abs(dy) > 80) return;
+    if (startX > window.innerWidth - 48 && dx < -60 && state.me?.user?.is_admin) openAdminDrawer();
+    if (document.querySelector('#admin-drawer').classList.contains('open') && dx > 70) closeAdminDrawer();
+  }, { passive: true });
+}
+
+function groupBy(items, getKey) {
+  return items.reduce((groups, item) => {
+    const key = getKey(item);
+    groups[key] = groups[key] || [];
+    groups[key].push(item);
+    return groups;
+  }, {});
 }
 
 function formatDate(value) {
@@ -394,8 +612,16 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
+function escapeAttr(value) {
+  return escapeHtml(value).replaceAll('`', '&#096;');
+}
+
 document.querySelectorAll('.tab').forEach((button) => {
   button.addEventListener('click', () => switchTab(button.dataset.tab));
+});
+
+document.querySelectorAll('.drawer-tab').forEach((button) => {
+  button.addEventListener('click', () => switchAdminView(button.dataset.adminView));
 });
 
 document.querySelector('#stake').addEventListener('input', (event) => {
@@ -407,6 +633,10 @@ document.querySelector('#place-bet').addEventListener('click', () => {
   submitBet().catch((error) => status(error.message));
 });
 
+document.querySelector('#open-admin').addEventListener('click', openAdminDrawer);
+document.querySelector('#close-admin').addEventListener('click', closeAdminDrawer);
+document.querySelector('#admin-backdrop').addEventListener('click', closeAdminDrawer);
+
 document.querySelector('#sync-odds').addEventListener('click', () => {
   syncOdds().catch((error) => status(error.message));
 });
@@ -415,12 +645,15 @@ document.querySelector('#refresh-usage').addEventListener('click', () => {
   refreshUsage().catch((error) => status(error.message));
 });
 
+document.querySelector('#reload-aliases').addEventListener('click', () => {
+  loadAliases().catch((error) => status(error.message));
+});
+
 document.querySelector('#open-create-user').addEventListener('click', openCreateUserModal);
-
 document.querySelector('#close-create-user').addEventListener('click', closeCreateUserModal);
-
 document.querySelector('#create-user-form').addEventListener('submit', (event) => {
   createUser(event).catch((error) => status(error.message));
 });
 
+setupSwipe();
 init();

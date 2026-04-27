@@ -42,6 +42,8 @@ def list_admin_users(db: SupabaseRestClient) -> list[dict[str, Any]]:
 def create_admin_user(db: SupabaseRestClient, admin_user: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     first_name = clean_text(payload.get("first_name"))
     last_name = clean_text(payload.get("last_name"))
+    username = clean_text(payload.get("username")).lstrip("@")
+    tg_id = clean_text(payload.get("tg_id")) or f"manual:{uuid4().hex}"
     balance = parse_balance(payload.get("balance", 0))
 
     if not first_name:
@@ -51,7 +53,8 @@ def create_admin_user(db: SupabaseRestClient, admin_user: dict[str, Any], payloa
         db.insert(
             "users",
             {
-                "tg_id": f"manual:{uuid4().hex}",
+                "tg_id": tg_id,
+                "username": username or None,
                 "first_name": first_name,
                 "last_name": last_name,
                 "client_status": "active",

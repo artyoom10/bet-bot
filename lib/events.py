@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from lib.config import SPORT_KEYS
 from lib.supabase_client import SupabaseRestClient
 
 
@@ -10,6 +11,12 @@ SELECTION_LABELS = {
     "home_win": "П1",
     "draw": "X",
     "away_win": "П2",
+}
+
+DEFAULT_SPORT_TITLES = {
+    "soccer_russia_premier_league": "Российская Премьер-Лига",
+    "soccer_spain_la_liga": "Ла Лига",
+    "soccer_uefa_champs_league": "Лига чемпионов",
 }
 
 
@@ -101,6 +108,45 @@ def get_events_for_app(db: SupabaseRestClient, sport_key: str | None = None) -> 
         )
 
     return formatted
+
+
+def get_sports_for_app(db: SupabaseRestClient) -> list[dict[str, Any]]:
+    sports = db.select("sports", {"select": "*", "is_enabled": "eq.true", "order": "sport_key.asc"})
+    if not sports:
+        sports = default_sports()
+
+    events = db.select(
+        "events",
+        {
+            "select": "sport_key",
+            "status": "eq.upcoming",
+            "commence_time": f"gt.{datetime.now(timezone.utc).isoformat()}",
+            "limit": "1000",
+        },
+    )
+    counts = {}
+    for event in events:
+        counts[event["sport_key"]] = counts.get(event["sport_key"], 0) + 1
+
+    return [
+        {
+            "sport_key": sport["sport_key"],
+            "title": sport.get("title_ru") or sport.get("title_en") or sport["sport_key"],
+            "events_count": counts.get(sport["sport_key"], 0),
+        }
+        for sport in sports
+    ]
+
+
+def default_sports() -> list[dict[str, Any]]:
+    return [
+        {
+            "sport_key": sport_key,
+            "title_ru": DEFAULT_SPORT_TITLES.get(sport_key, sport_key),
+            "title_en": sport_key,
+        }
+        for sport_key in SPORT_KEYS
+    ]
 
 
 def choose_bookmaker_odds(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

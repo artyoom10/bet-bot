@@ -6,11 +6,12 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 
 from lib.admin_auth import require_admin
+from lib.admin_aliases import create_team_alias, get_aliases_dashboard, update_sport_alias, update_team_alias
 from lib.admin_users import create_admin_user, list_admin_users, update_admin_user
 from lib.bets import get_user_bets, place_bet
 from lib.config import admin_tg_ids, app_name
 from lib.errors import AppError, error_response
-from lib.events import get_events_for_app
+from lib.events import default_sports, get_events_for_app, get_sports_for_app
 from lib.odds_sync import refresh_odds_usage, run_odds_sync
 from lib.supabase_client import get_db
 from lib.telegram_auth import get_verified_telegram_user
@@ -98,6 +99,22 @@ def api_events():
     db = get_db()
     sport_key = request.args.get("sport_key")
     return jsonify(get_events_for_app(db, sport_key=sport_key))
+
+
+@app.get("/api/sports")
+def api_sports():
+    db = get_db()
+    try:
+        return jsonify(get_sports_for_app(db))
+    except AppError as exc:
+        if exc.error != "supabase_not_configured":
+            raise
+        return jsonify(
+            [
+                {"sport_key": sport["sport_key"], "title": sport["title_ru"], "events_count": 0}
+                for sport in default_sports()
+            ]
+        )
 
 
 @app.get("/api/events/<event_id>")
@@ -244,6 +261,37 @@ def api_admin_update_user(user_id: str):
     admin_user = require_admin(request, db)
     payload = request.get_json(silent=True) or {}
     return jsonify({"ok": True, **update_admin_user(db, admin_user, user_id, payload)})
+
+
+@app.get("/api/admin/aliases")
+def api_admin_aliases():
+    db = get_db()
+    require_admin(request, db)
+    return jsonify({"ok": True, **get_aliases_dashboard(db)})
+
+
+@app.patch("/api/admin/sports/<sport_key>")
+def api_admin_update_sport_alias(sport_key: str):
+    db = get_db()
+    admin_user = require_admin(request, db)
+    payload = request.get_json(silent=True) or {}
+    return jsonify({"ok": True, "sport": update_sport_alias(db, admin_user, sport_key, payload)})
+
+
+@app.patch("/api/admin/teams/<team_id>")
+def api_admin_update_team_alias(team_id: str):
+    db = get_db()
+    admin_user = require_admin(request, db)
+    payload = request.get_json(silent=True) or {}
+    return jsonify({"ok": True, "team": update_team_alias(db, admin_user, team_id, payload)})
+
+
+@app.post("/api/admin/team-aliases")
+def api_admin_create_team_alias():
+    db = get_db()
+    admin_user = require_admin(request, db)
+    payload = request.get_json(silent=True) or {}
+    return jsonify({"ok": True, **create_team_alias(db, admin_user, payload)})
 
 
 @app.post("/webhook")

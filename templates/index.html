@@ -9,81 +9,118 @@
   </head>
   <body>
     <main class="page">
-      <header class="header">
+      <header class="topbar">
         <div>
           <p class="label">Telegram Mini App</p>
           <h1>{{ app_name }}</h1>
         </div>
-        <div class="balance">
-          <span id="profile-name">Загрузка</span>
-          <strong id="balance-value">DEMO 0</strong>
+        <div class="top-actions">
+          <button class="admin-button admin-only" id="open-admin" hidden>Админ</button>
+          <div class="balance">
+            <span id="profile-name">Загрузка</span>
+            <strong id="balance-value">DEMO 0</strong>
+          </div>
         </div>
       </header>
 
-      <nav class="tabs">
+      <nav class="main-tabs">
         <button class="tab active" data-tab="events">Линия</button>
         <button class="tab" data-tab="bets">Мои ставки</button>
-        <button class="tab admin-only" data-tab="admin" hidden>Админка</button>
-        <button class="tab admin-only" data-tab="users" hidden>Пользователи</button>
       </nav>
 
       <section class="status" id="status">Инициализация приложения...</section>
       <section class="debug-panel" id="admin-debug" hidden></section>
 
       <section class="view active" id="view-events">
-        <div class="layout">
-          <div class="grid" id="events"></div>
-          <aside class="ticket">
-            <h2>Купон</h2>
-            <div id="ticket-empty" class="muted">Выберите исход, чтобы сделать демо-ставку.</div>
-            <div id="ticket-form" hidden>
-              <p class="muted" id="ticket-event"></p>
-              <div class="ticket-row">
-                <span id="ticket-selection"></span>
-                <strong id="ticket-price"></strong>
-              </div>
-              <label>
-                Сумма
-                <input id="stake" type="number" min="10" step="10" value="100">
-              </label>
-              <div class="ticket-row">
-                <span>Возможный выигрыш</span>
-                <strong id="ticket-win"></strong>
-              </div>
-              <button class="primary" id="place-bet">Поставить</button>
-            </div>
-          </aside>
-        </div>
+        <div class="sports-strip" id="sports"></div>
+        <div class="events-list" id="events"></div>
       </section>
 
       <section class="view" id="view-bets">
-        <div class="grid" id="bets"></div>
+        <div class="events-list" id="bets"></div>
       </section>
+    </main>
 
-      <section class="view" id="view-admin">
+    <aside class="bet-slip" id="bet-slip">
+      <div id="ticket-empty" class="muted">Выберите коэффициент</div>
+      <div id="ticket-form" hidden>
+        <div class="slip-main">
+          <div>
+            <p class="muted" id="ticket-event"></p>
+            <strong id="ticket-selection"></strong>
+          </div>
+          <strong class="slip-odd" id="ticket-price"></strong>
+        </div>
+        <div class="slip-controls">
+          <label>
+            Сумма
+            <input id="stake" type="number" min="10" step="10" value="100">
+          </label>
+          <div>
+            <span class="muted">Выигрыш</span>
+            <strong id="ticket-win"></strong>
+          </div>
+          <button class="primary" id="place-bet">Поставить</button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="drawer-backdrop" id="admin-backdrop" hidden></div>
+    <aside class="admin-drawer" id="admin-drawer" aria-hidden="true">
+      <header class="drawer-head">
+        <div>
+          <p class="label">Панель</p>
+          <h2>Админка</h2>
+        </div>
+        <button id="close-admin">Закрыть</button>
+      </header>
+
+      <nav class="drawer-tabs">
+        <button class="drawer-tab active" data-admin-view="overview">Обзор</button>
+        <button class="drawer-tab" data-admin-view="users">Пользователи</button>
+        <button class="drawer-tab" data-admin-view="aliases">Алиасы</button>
+      </nav>
+
+      <section class="drawer-view active" id="admin-view-overview">
         <div class="admin-actions">
-          <button class="primary" id="sync-odds">Обновить матчи и коэффициенты</button>
-          <button id="refresh-usage">Обновить статистику Odds API</button>
+          <button class="primary" id="sync-odds">Обновить матчи</button>
+          <button id="refresh-usage">Обновить лимиты API</button>
         </div>
-        <div class="admin-grid">
-          <article class="panel">
-            <h2>Обзор</h2>
-            <div id="admin-dashboard" class="stack"></div>
-          </article>
-          <article class="panel">
-            <h2>Последние sync</h2>
-            <div id="sync-runs" class="stack"></div>
-          </article>
-        </div>
+        <article class="panel">
+          <h2>Обзор</h2>
+          <div id="admin-dashboard" class="stack"></div>
+        </article>
+        <article class="panel">
+          <h2>Последние sync</h2>
+          <div id="sync-runs" class="stack"></div>
+        </article>
       </section>
 
-      <section class="view" id="view-users">
+      <section class="drawer-view" id="admin-view-users">
         <div class="admin-actions">
           <button class="primary" id="open-create-user">Добавить пользователя</button>
         </div>
-        <div class="grid" id="admin-users"></div>
+        <div class="stack" id="admin-users"></div>
       </section>
-    </main>
+
+      <section class="drawer-view" id="admin-view-aliases">
+        <div class="admin-actions">
+          <button class="primary" id="reload-aliases">Обновить алиасы</button>
+        </div>
+        <article class="panel">
+          <h2>Пустые команды</h2>
+          <div class="stack" id="unknown-aliases"></div>
+        </article>
+        <article class="panel">
+          <h2>Турниры</h2>
+          <div class="stack" id="sport-aliases"></div>
+        </article>
+        <article class="panel">
+          <h2>Команды</h2>
+          <div class="stack" id="team-aliases"></div>
+        </article>
+      </section>
+    </aside>
 
     <div class="modal" id="create-user-modal" hidden>
       <form class="modal-body" id="create-user-form">
@@ -91,6 +128,14 @@
           <h2>Добавить пользователя</h2>
           <button type="button" id="close-create-user">Закрыть</button>
         </div>
+        <label>
+          Telegram ID
+          <input name="tg_id" autocomplete="off" placeholder="123456789">
+        </label>
+        <label>
+          Username
+          <input name="username" autocomplete="off" placeholder="username без @">
+        </label>
         <label>
           Имя
           <input name="first_name" required autocomplete="off">
