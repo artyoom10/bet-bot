@@ -1,9 +1,7 @@
 :root {
-  color: #f7f3ea;
-  background: #151712;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  color: #f6f3ea;
+  background: #121510;
+  font-family: Arial, Helvetica, sans-serif;
 }
 
 * {
@@ -14,116 +12,90 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: linear-gradient(135deg, rgba(42, 91, 72, 0.45), transparent 42%), #151712;
+  background: #121510;
 }
 
-button,
-input {
-  font: inherit;
-}
-
-button {
-  cursor: pointer;
-}
-
-.shell {
-  width: min(1120px, 100%);
+.page {
+  width: min(960px, 100%);
   margin: 0 auto;
   padding: 20px;
 }
 
-.topbar {
+.header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
-.eyebrow {
-  margin: 0 0 4px;
-  color: #a5dd9b;
+.label {
+  margin: 0 0 6px;
+  color: #9fe870;
   font-size: 13px;
   text-transform: uppercase;
 }
 
 h1,
-h2,
-p {
-  margin-top: 0;
+h2 {
+  margin: 0;
 }
 
 h1 {
-  margin-bottom: 0;
-  font-size: clamp(28px, 7vw, 48px);
+  font-size: 40px;
 }
 
-.profile,
+.balance,
 .status,
-.ticket,
 .event {
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(24, 28, 22, 0.82);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+  border-radius: 8px;
+  background: #1d231a;
 }
 
-.profile {
+.balance {
   display: grid;
   gap: 4px;
   min-width: 150px;
   padding: 12px 14px;
-  border-radius: 8px;
   text-align: right;
 }
 
-.profile span,
-.muted,
-.event-head,
+.balance span,
+.meta,
 .status {
   color: #c8c4b7;
 }
 
 .status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 16px;
   padding: 12px 14px;
-  border-radius: 8px;
 }
 
-.layout {
-  display: grid;
-  grid-template-columns: 1fr 320px;
-  gap: 18px;
-  align-items: start;
-}
-
-.events {
+.grid {
   display: grid;
   gap: 14px;
 }
 
-.event,
-.ticket {
-  border-radius: 8px;
+.event {
   padding: 18px;
 }
 
-.event-head,
-.ticket-row {
+.meta {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-}
-
-.event h2,
-.ticket h2 {
-  margin-bottom: 16px;
-  font-size: 20px;
+  margin-bottom: 10px;
 }
 
 .odds {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+  margin-top: 16px;
 }
 
 .odds button {
@@ -131,73 +103,29 @@ h1 {
   align-items: center;
   justify-content: space-between;
   min-height: 48px;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  color: #f7f3ea;
-  background: #24291f;
-}
-
-.odds button.active,
-.primary {
-  border-color: #9fe870;
-  color: #11200d;
-  background: #9fe870;
-}
-
-.ticket {
-  position: sticky;
-  top: 16px;
-}
-
-.ticket label {
-  display: grid;
-  gap: 8px;
-  margin: 18px 0;
-  color: #c8c4b7;
-}
-
-.ticket input {
-  width: 100%;
-  min-height: 44px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   padding: 10px 12px;
-  color: #f7f3ea;
-  background: #10130f;
+  color: #f6f3ea;
+  background: #293022;
+  font: inherit;
 }
 
-.ticket-row {
-  margin: 12px 0;
-}
-
-.primary {
-  width: 100%;
-  min-height: 48px;
-  margin-top: 12px;
-  border-radius: 8px;
-  font-weight: 800;
-}
-
-@media (max-width: 760px) {
-  .shell {
+@media (max-width: 640px) {
+  .page {
     padding: 14px;
   }
 
-  .topbar {
+  .header {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .profile {
+  .balance {
     text-align: left;
   }
 
-  .layout {
+  .odds {
     grid-template-columns: 1fr;
-  }
-
-  .ticket {
-    position: static;
   }
 }
