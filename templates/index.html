@@ -15,43 +15,67 @@
           <h1>{{ app_name }}</h1>
         </div>
         <div class="balance">
-          <span>Demo balance</span>
-          <strong>10 000 RUB</strong>
+          <span id="profile-name">Загрузка</span>
+          <strong id="balance-value">DEMO 0</strong>
         </div>
       </header>
 
-      <section class="status">
-        <span>Backend: online</span>
-        <span>Supabase: {{ "configured" if has_supabase else "not configured" }}</span>
-        <span>Telegram: {{ "configured" if has_telegram else "not configured" }}</span>
+      <nav class="tabs">
+        <button class="tab active" data-tab="events">Линия</button>
+        <button class="tab" data-tab="bets">Мои ставки</button>
+        <button class="tab admin-only" data-tab="admin" hidden>Админка</button>
+      </nav>
+
+      <section class="status" id="status">Инициализация приложения...</section>
+
+      <section class="view active" id="view-events">
+        <div class="layout">
+          <div class="grid" id="events"></div>
+          <aside class="ticket">
+            <h2>Купон</h2>
+            <div id="ticket-empty" class="muted">Выберите исход, чтобы сделать демо-ставку.</div>
+            <div id="ticket-form" hidden>
+              <p class="muted" id="ticket-event"></p>
+              <div class="ticket-row">
+                <span id="ticket-selection"></span>
+                <strong id="ticket-price"></strong>
+              </div>
+              <label>
+                Сумма
+                <input id="stake" type="number" min="10" step="10" value="100">
+              </label>
+              <div class="ticket-row">
+                <span>Возможный выигрыш</span>
+                <strong id="ticket-win"></strong>
+              </div>
+              <button class="primary" id="place-bet">Поставить</button>
+            </div>
+          </aside>
+        </div>
       </section>
 
-      <section class="grid">
-        <article class="event">
-          <div class="meta">
-            <span>Football</span>
-            <time>Today, 20:30</time>
-          </div>
-          <h2>Moscow vs Petersburg</h2>
-          <div class="odds">
-            <button>P1 <strong>1.92</strong></button>
-            <button>X <strong>3.35</strong></button>
-            <button>P2 <strong>4.10</strong></button>
-          </div>
-        </article>
+      <section class="view" id="view-bets">
+        <div class="grid" id="bets"></div>
+      </section>
 
-        <article class="event">
-          <div class="meta">
-            <span>Tennis</span>
-            <time>Tomorrow, 15:00</time>
-          </div>
-          <h2>Ivanov vs Smirnov</h2>
-          <div class="odds">
-            <button>P1 <strong>1.68</strong></button>
-            <button>P2 <strong>2.24</strong></button>
-          </div>
-        </article>
+      <section class="view" id="view-admin">
+        <div class="admin-actions">
+          <button class="primary" id="sync-odds">Обновить матчи и коэффициенты</button>
+          <button id="refresh-usage">Обновить статистику Odds API</button>
+        </div>
+        <div class="admin-grid">
+          <article class="panel">
+            <h2>Обзор</h2>
+            <div id="admin-dashboard" class="stack"></div>
+          </article>
+          <article class="panel">
+            <h2>Последние sync</h2>
+            <div id="sync-runs" class="stack"></div>
+          </article>
+        </div>
       </section>
     </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
 </html>
