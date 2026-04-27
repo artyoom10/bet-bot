@@ -27,7 +27,7 @@ def create_app() -> Flask:
 
     @app.get("/health")
     def health():
-        return jsonify({"ok": True, "service": app.config["APP_NAME"]})
+        return jsonify({"ok": True, "service": app.config["APP_NAME"], "version": "0.1.1"})
 
     @app.get("/api/me")
     def me():
