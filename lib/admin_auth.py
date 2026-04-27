@@ -9,10 +9,20 @@ from lib.users import upsert_user_from_tg
 
 def require_admin(request: Request, db: SupabaseRestClient) -> dict:
     tg_user = get_verified_telegram_user(request)
-    user = upsert_user_from_tg(db, tg_user)
-    tg_id = str(user["tg_id"])
+    tg_id = str(tg_user["tg_id"])
 
-    if user.get("is_admin") or tg_id in admin_tg_ids():
+    if tg_id in admin_tg_ids():
+        return {
+            "id": None,
+            "tg_id": tg_id,
+            "username": tg_user.get("username"),
+            "first_name": tg_user.get("first_name"),
+            "is_admin": True,
+            "admin_source": "env",
+        }
+
+    user = upsert_user_from_tg(db, tg_user)
+    if user.get("is_admin"):
         return user
 
     raise AppError("forbidden", "Admin access required", 403)

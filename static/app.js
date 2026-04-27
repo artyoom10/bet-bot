@@ -61,11 +61,43 @@ async function loadMe() {
   document.querySelector('#profile-name').textContent = data.user.first_name || data.user.username || 'Telegram user';
   document.querySelector('#balance-value').textContent = money(data.wallet.balance);
   document.querySelector('.admin-only').hidden = !data.user.is_admin;
+  renderAdminDebug(data.admin_debug);
   if (data.user.is_admin) {
-    status(`Admin mode: on · tg_id ${data.admin_debug?.tg_id || data.user.tg_id}`);
+    status('Admin mode: on');
   } else {
-    status(`Admin mode: off · tg_id ${data.admin_debug?.tg_id || data.user.tg_id} · ADMIN ids: ${data.admin_debug?.admin_ids_configured ?? 0}`);
+    status('Admin mode: off');
   }
+}
+
+function renderAdminDebug(debug) {
+  const root = document.querySelector('#admin-debug');
+  if (!root || !debug) return;
+
+  root.hidden = false;
+  root.innerHTML = `
+    <div class="debug-row">
+      <span>Мой tg_id</span>
+      <strong>${escapeHtml(debug.tg_id)}</strong>
+    </div>
+    <div class="debug-row">
+      <span>Админов в env</span>
+      <strong>${debug.admin_ids_configured}</strong>
+    </div>
+    <div class="debug-row">
+      <span>Совпал с ADMIN_TELEGRAM_IDS</span>
+      <strong>${debug.matched_admin_env ? 'да' : 'нет'}</strong>
+    </div>
+    <div class="debug-row">
+      <span>Админ итог</span>
+      <strong>${debug.is_admin_final ? 'да' : 'нет'}</strong>
+    </div>
+    ${debug.profile_loaded ? '' : `
+      <div class="debug-row">
+        <span>Профиль Supabase</span>
+        <strong>не нужен для env-админа</strong>
+      </div>
+    `}
+  `;
 }
 
 async function loadEvents() {

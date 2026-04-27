@@ -47,8 +47,24 @@ def health():
 def api_me():
     db = get_db()
     tg_user = get_verified_telegram_user(request)
-    user = upsert_user_from_tg(db, tg_user)
-    wallet = get_or_create_wallet(db, user)
+    tg_id = str(tg_user["tg_id"])
+    matched_admin_env = tg_id in admin_tg_ids()
+    profile_error = None
+
+    is_admin_from_db = False
+    try:
+        user = upsert_user_from_tg(db, tg_user)
+        wallet = get_or_create_wallet(db, user)
+        is_admin_from_db = bool(user.get("is_admin"))
+    except Exception as exc:
+        if not matched_admin_env:
+            raise
+        profile_error = str(exc)
+        user = synthetic_user_from_tg(tg_user, is_admin=True)
+        wallet = default_wallet()
+
+    if matched_admin_env and not user.get("is_admin"):
+        user["is_admin"] = True
 
     return jsonify(
         {
@@ -56,10 +72,13 @@ def api_me():
             "user": public_user(user),
             "wallet": public_wallet(wallet),
             "admin_debug": {
-                "tg_id": str(user["tg_id"]),
-                "is_admin_from_db": bool(user.get("is_admin")),
-                "matched_admin_env": str(user["tg_id"]) in admin_tg_ids(),
+                "tg_id": tg_id,
+                "is_admin_from_db": is_admin_from_db,
+                "matched_admin_env": matched_admin_env,
+                "is_admin_final": bool(user.get("is_admin") or matched_admin_env),
                 "admin_ids_configured": len(admin_tg_ids()),
+                "profile_loaded": profile_error is None,
+                "profile_error": profile_error,
             },
         }
     )
@@ -286,6 +305,27 @@ def public_wallet(wallet: dict[str, Any]) -> dict[str, Any]:
         "balance": float(wallet.get("balance", 0)),
         "withdrawable_balance": float(wallet.get("withdrawable_balance", 0)),
         "locked_balance": float(wallet.get("locked_balance", 0)),
+    }
+
+
+def synthetic_user_from_tg(tg_user: dict[str, Any], is_admin: bool = False) -> dict[str, Any]:
+    return {
+        "id": None,
+        "tg_id": str(tg_user["tg_id"]),
+        "username": tg_user.get("username"),
+        "first_name": tg_user.get("first_name"),
+        "client_status": "telegram_only",
+        "is_blocked": False,
+        "is_admin": is_admin,
+    }
+
+
+def default_wallet() -> dict[str, Any]:
+    return {
+        "currency": "DEMO",
+        "balance": 0,
+        "withdrawable_balance": 0,
+        "locked_balance": 0,
     }
 
 

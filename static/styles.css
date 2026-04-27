@@ -63,6 +63,7 @@ h2 {
 
 .balance,
 .status,
+.debug-panel,
 .event,
 .ticket,
 .panel,
@@ -111,6 +112,25 @@ h2 {
 .status {
   margin-bottom: 14px;
   padding: 12px 14px;
+}
+
+.debug-panel {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+}
+
+.debug-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #c9c5b8;
+}
+
+.debug-row strong {
+  color: #f6f3ea;
+  text-align: right;
 }
 
 .view {
