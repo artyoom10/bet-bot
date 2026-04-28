@@ -34,7 +34,9 @@ function money(value) {
 }
 
 function status(message) {
-  document.querySelector('#status').textContent = message;
+  const root = document.querySelector('#status');
+  root.textContent = message || '';
+  root.hidden = !message;
 }
 
 async function apiFetch(path, options = {}) {
@@ -78,7 +80,7 @@ async function loadMe() {
   document.querySelectorAll('.admin-only').forEach((item) => {
     item.hidden = !data.user.is_admin;
   });
-  status('Готово');
+  status('');
 }
 
 function resolveProfileName(data) {
