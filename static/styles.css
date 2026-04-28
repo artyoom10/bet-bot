@@ -20,7 +20,7 @@ button, input, select { font: inherit; }
 button { cursor: pointer; }
 
 .page { width: min(1180px, 100%); margin: 0 auto; padding: 10px; }
-.topbar, .panel, .empty-state, .league-block, .bet-row, .admin-card, .status, .main-tabs, .debug-panel {
+.topbar, .panel, .empty-state, .league-block, .bet-row, .admin-card, .status, .main-tabs, .debug-panel, .debug-box {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--panel);
@@ -104,6 +104,11 @@ h2 { margin-bottom: 10px; font-size: 18px; }
 .stat:last-child, .sync-row:last-child { border-bottom: 0; }
 .danger strong { color: var(--danger); }
 .card-head { align-items: center; margin-bottom: 10px; }
+.alias-group { display: grid; gap: 8px; margin-bottom: 14px; }
+.alias-group h3 { margin: 4px 0 0; color: var(--accent-2); font-size: 14px; }
+.debug-box { margin-top: 10px; padding: 10px; }
+.debug-box summary { cursor: pointer; color: var(--accent-2); font-weight: 700; }
+.debug-box pre { max-height: 360px; overflow: auto; margin: 10px 0 0; border-radius: 8px; padding: 10px; color: #dce6f2; background: #0c0f13; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 
 .modal { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 12px; background: rgba(0,0,0,.55); }
 .modal-body { display: grid; gap: 10px; width: min(430px, 100%); border: 1px solid var(--border); border-radius: 10px; padding: 14px; background: var(--panel); }

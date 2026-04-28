@@ -1,4 +1,6 @@
 import os
+from datetime import datetime, timezone
+from traceback import format_exception
 from typing import Any
 
 import requests
@@ -201,13 +203,16 @@ def api_admin_sync_odds():
     db = get_db()
     admin_user = require_admin(request, db)
     payload = request.get_json(silent=True) or {}
-    sync = run_odds_sync(
-        db,
-        triggered_by="admin_mini_app",
-        admin_user=admin_user,
-        sport_keys=payload.get("sport_keys"),
-    )
-    return jsonify({"ok": True, "sync": sync})
+    try:
+        sync = run_odds_sync(
+            db,
+            triggered_by="admin_mini_app",
+            admin_user=admin_user,
+            sport_keys=requested_sport_keys(payload),
+        )
+        return jsonify({"ok": True, "sync": sync, "debug": sync_endpoint_debug(db, payload)})
+    except Exception as exc:
+        return sync_error_json(db, "sync_odds_failed", exc, payload)
 
 
 @app.post("/api/admin/refresh-odds-usage")
@@ -280,8 +285,16 @@ def api_admin_sync_scores_and_settle():
     db = get_db()
     admin_user = require_admin(request, db)
     payload = request.get_json(silent=True) or {}
-    result = sync_scores_and_settle(db, admin_user, days_from=int(payload.get("days_from", 3)))
-    return jsonify({"ok": True, "settlement": result})
+    try:
+        result = sync_scores_and_settle(
+            db,
+            admin_user,
+            days_from=int(payload.get("days_from", 3)),
+            sport_keys=requested_sport_keys(payload),
+        )
+        return jsonify({"ok": True, "settlement": result, "debug": settlement_endpoint_debug(db, payload)})
+    except Exception as exc:
+        return sync_error_json(db, "sync_scores_and_settle_failed", exc, payload, settlement_endpoint_debug)
 
 
 @app.post("/api/admin/sync-scores")
@@ -289,16 +302,29 @@ def api_admin_sync_scores():
     db = get_db()
     admin_user = require_admin(request, db)
     payload = request.get_json(silent=True) or {}
-    result = sync_scores_and_settle(db, admin_user, days_from=int(payload.get("days_from", 3)), settle=False)
-    return jsonify({"ok": True, "settlement": result})
+    try:
+        result = sync_scores_and_settle(
+            db,
+            admin_user,
+            days_from=int(payload.get("days_from", 3)),
+            settle=False,
+            sport_keys=requested_sport_keys(payload),
+        )
+        return jsonify({"ok": True, "settlement": result, "debug": settlement_endpoint_debug(db, payload)})
+    except Exception as exc:
+        return sync_error_json(db, "sync_scores_failed", exc, payload, settlement_endpoint_debug)
 
 
 @app.post("/api/admin/settle-bets")
 def api_admin_settle_bets():
     db = get_db()
     require_admin(request, db)
-    settled = settle_pending_bets(db)
-    return jsonify({"ok": True, "bets_settled": settled})
+    payload = request.get_json(silent=True) or {}
+    try:
+        settled = settle_pending_bets(db)
+        return jsonify({"ok": True, "bets_settled": settled, "debug": settlement_endpoint_debug(db, payload)})
+    except Exception as exc:
+        return sync_error_json(db, "settle_bets_failed", exc, payload, settlement_endpoint_debug)
 
 
 @app.get("/api/admin/settlement-runs")
@@ -489,6 +515,88 @@ def normalize_last_sync(sync: dict[str, Any] | None) -> dict[str, Any] | None:
         item["status"] = "stale"
         item["error_message"] = item["error_message"] or "Sync did not finish correctly"
     return item
+
+
+def sync_error_json(db, error_code: str, exc: Exception, payload: dict[str, Any], debug_builder=None):
+    status_code = exc.status_code if isinstance(exc, AppError) else 500
+    debug_builder = debug_builder or sync_endpoint_debug
+    debug = debug_builder(db, payload)
+    debug["exception"] = exception_debug(exc)
+    return (
+        jsonify(
+            {
+                "ok": False,
+                "error": error_code,
+                "message": str(exc),
+                "debug": debug,
+            }
+        ),
+        status_code,
+    )
+
+
+def sync_endpoint_debug(db, payload: dict[str, Any]) -> dict[str, Any]:
+    debug = base_endpoint_debug(payload)
+    debug["sync_runs"] = safe_debug_select(db, "sync_runs", {"select": "*", "order": "started_at.desc", "limit": "5"})
+    debug["last_sync"] = normalize_last_sync(first(debug["sync_runs"]["rows"])) if debug["sync_runs"].get("ok") else None
+    debug["sports"] = safe_debug_select(db, "sports", {"select": "*", "order": "sport_key.asc", "limit": "20"})
+    debug["recent_events"] = safe_debug_select(
+        db,
+        "events",
+        {"select": "id,sport_key,external_event_id,home_team_raw,away_team_raw,status,commence_time,last_odds_sync_at,updated_at", "order": "updated_at.desc", "limit": "10"},
+    )
+    return debug
+
+
+def settlement_endpoint_debug(db, payload: dict[str, Any]) -> dict[str, Any]:
+    debug = base_endpoint_debug(payload)
+    debug["settlement_runs"] = safe_debug_select(db, "settlement_runs", {"select": "*", "order": "started_at.desc", "limit": "5"})
+    debug["pending_bets"] = safe_debug_select(db, "bets", {"select": "id,user_id,status,bet_type,amount,total_odds,created_at", "status": "eq.pending", "limit": "20"})
+    debug["finished_events"] = safe_debug_select(
+        db,
+        "events",
+        {"select": "id,sport_key,external_event_id,home_team_raw,away_team_raw,status,home_score,away_score,result_winner,result_last_update", "status": "in.(finished,cancelled)", "order": "result_last_update.desc", "limit": "10"},
+    )
+    return debug
+
+
+def base_endpoint_debug(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "endpoint": request.path,
+        "method": request.method,
+        "payload": payload,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "env_flags": {
+            "supabase_url_set": bool(os.getenv("SUPABASE_URL")),
+            "supabase_service_key_set": bool(os.getenv("SUPABASE_SERVICE_ROLE_KEY")),
+            "odds_api_key_set": bool(os.getenv("ODDS_API_KEY")),
+        },
+    }
+
+
+def requested_sport_keys(payload: dict[str, Any]) -> list[str] | None:
+    sport_keys = payload.get("sport_keys")
+    if isinstance(sport_keys, str):
+        return [sport_keys] if sport_keys else None
+    if isinstance(sport_keys, list):
+        return [str(item) for item in sport_keys if item]
+    return None
+
+
+def safe_debug_select(db, table: str, params: dict[str, Any]) -> dict[str, Any]:
+    try:
+        rows = db.select(table, params)
+        return {"ok": True, "count": len(rows), "rows": rows}
+    except Exception as exc:
+        return {"ok": False, "table": table, "error": exception_debug(exc)}
+
+
+def exception_debug(exc: Exception) -> dict[str, Any]:
+    return {
+        "type": exc.__class__.__name__,
+        "message": str(exc),
+        "traceback": "".join(format_exception(type(exc), exc, exc.__traceback__))[-5000:],
+    }
 
 
 if __name__ == "__main__":

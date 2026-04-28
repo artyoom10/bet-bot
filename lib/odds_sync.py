@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from traceback import format_exception
 from typing import Any
 
 from lib.config import SPORT_KEYS
@@ -78,6 +79,9 @@ def run_odds_sync(
         "quota_remaining": None,
         "quota_used": None,
         "errors": [],
+        "selected_sports": selected_sports,
+        "sport_results": [],
+        "debug_steps": [{"step": "sync_run_created", "sync_run_id": sync_run["id"], "at": sync_run["started_at"]}],
         "started_at": sync_run["started_at"],
     }
 
@@ -85,7 +89,10 @@ def run_odds_sync(
     status = "success"
     try:
         ensure_sports_seed(db, selected_sports)
+        totals["debug_steps"].append({"step": "sports_seed_done", "at": datetime.now(timezone.utc).isoformat()})
         for sport_key in selected_sports:
+            sport_started_at = datetime.now(timezone.utc)
+            sport_report = {"sport_key": sport_key, "status": "started", "started_at": sport_started_at.isoformat()}
             try:
                 result = sync_single_sport(db, sport_key)
                 totals["success_sports"] += 1
@@ -96,9 +103,28 @@ def run_odds_sync(
                 totals["quota_remaining"] = result.get("quota_remaining")
                 totals["quota_used"] = result.get("quota_used")
                 request_urls.append(result.get("request_url"))
+                sport_report.update(
+                    {
+                        "status": "success",
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "duration_seconds": round((datetime.now(timezone.utc) - sport_started_at).total_seconds(), 3),
+                        **result,
+                    }
+                )
             except Exception as exc:
                 totals["failed_sports"] += 1
-                totals["errors"].append({"sport_key": sport_key, "message": str(exc)})
+                error = exception_debug(exc)
+                error["sport_key"] = sport_key
+                totals["errors"].append(error)
+                sport_report.update(
+                    {
+                        "status": "error",
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "duration_seconds": round((datetime.now(timezone.utc) - sport_started_at).total_seconds(), 3),
+                        "error": error,
+                    }
+                )
+            totals["sport_results"].append(sport_report)
 
         if totals["failed_sports"] and totals["success_sports"]:
             status = "partial_success"
@@ -106,25 +132,30 @@ def run_odds_sync(
             status = "error"
     except Exception as exc:
         status = "error"
-        totals["errors"].append({"message": str(exc)})
+        totals["errors"].append(exception_debug(exc))
     finally:
         finished_at = datetime.now(timezone.utc).isoformat()
-        db.update(
-            "sync_runs",
-            {
-                "status": status,
-                "request_url": "\n".join([url for url in request_urls if url]),
-                "events_count": totals["events_count"],
-                "odds_count": totals["odds_count"],
-                "bookmakers_count": totals["bookmakers_count"],
-                "quota_remaining": totals["quota_remaining"],
-                "quota_used": totals["quota_used"],
-                "quota_last": totals["quota_last_total"],
-                "error_message": "; ".join(error["message"] for error in totals["errors"])[:1000] or None,
-                "finished_at": finished_at,
-            },
-            {"id": f"eq.{sync_run['id']}"},
-        )
+        try:
+            db.update(
+                "sync_runs",
+                {
+                    "status": status,
+                    "request_url": "\n".join([url for url in request_urls if url]),
+                    "events_count": totals["events_count"],
+                    "odds_count": totals["odds_count"],
+                    "bookmakers_count": totals["bookmakers_count"],
+                    "quota_remaining": totals["quota_remaining"],
+                    "quota_used": totals["quota_used"],
+                    "quota_last": totals["quota_last_total"],
+                    "error_message": "; ".join(error["message"] for error in totals["errors"])[:1000] or None,
+                    "finished_at": finished_at,
+                },
+                {"id": f"eq.{sync_run['id']}"},
+            )
+            totals["debug_steps"].append({"step": "sync_run_updated", "at": finished_at})
+        except Exception as exc:
+            status = "error"
+            totals["errors"].append({"stage": "sync_run_update", **exception_debug(exc)})
 
     latest = first(db.select("sync_runs", {"select": "*", "id": f"eq.{sync_run['id']}", "limit": "1"}))
     if admin_user:
@@ -141,9 +172,12 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
     events = api_result["data"]
 
     counts = {
+        "api_events_count": len(events),
         "events_count": 0,
         "odds_count": 0,
         "bookmakers_count": 0,
+        "snapshots_count": 0,
+        "events_without_h2h": 0,
         "quota_remaining": api_result.get("quota_remaining"),
         "quota_used": api_result.get("quota_used"),
         "quota_last": api_result.get("quota_last"),
@@ -181,6 +215,7 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
             continue
 
         counts["events_count"] += 1
+        event_h2h_count = 0
         for bookmaker in source_event.get("bookmakers", []):
             bookmaker_key = bookmaker["key"]
             db.upsert(
@@ -229,6 +264,7 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
                         "event_id,bookmaker_key,market_key,selection_key",
                     )
                     counts["odds_count"] += 1
+                    event_h2h_count += 1
 
                     if not old or float(old["price"]) != price:
                         db.insert(
@@ -243,6 +279,10 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
                                 "api_last_update": market.get("last_update") or bookmaker.get("last_update"),
                             },
                         )
+                        counts["snapshots_count"] += 1
+
+        if event_h2h_count == 0:
+            counts["events_without_h2h"] += 1
 
     return counts
 
@@ -329,3 +369,11 @@ def log_admin_action(
         )
     except Exception:
         return
+
+
+def exception_debug(exc: Exception) -> dict[str, Any]:
+    return {
+        "type": exc.__class__.__name__,
+        "message": str(exc),
+        "traceback": "".join(format_exception(type(exc), exc, exc.__traceback__))[-5000:],
+    }

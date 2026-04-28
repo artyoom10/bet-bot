@@ -96,6 +96,16 @@ def update_admin_user(
         raise AppError("user_not_found", "Пользователь не найден", 404)
 
     user_patch: dict[str, Any] = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    for field in ("tg_id", "username", "first_name", "last_name"):
+        if field not in payload:
+            continue
+        value = clean_text(payload.get(field))
+        if field == "username":
+            value = value.lstrip("@")
+        if field in {"tg_id", "first_name"} and not value:
+            raise AppError(f"invalid_{field}", "Telegram ID и имя не могут быть пустыми", 400)
+        user_patch[field] = value or None
+
     if "client_status" in payload:
         status = clean_text(payload.get("client_status"))
         if status not in CLIENT_STATUSES:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from traceback import format_exception
 from typing import Any
 
 from lib.config import SPORT_KEYS
@@ -16,6 +17,7 @@ def sync_scores_and_settle(
     days_from: int = 3,
     *,
     settle: bool = True,
+    sport_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     run = first(
         db.insert(
@@ -30,6 +32,7 @@ def sync_scores_and_settle(
     if not run:
         raise AppError("settlement_run_create_failed", "Could not create settlement run", 500)
 
+    selected_sports = sport_keys or SPORT_KEYS
     report = {
         "status": "success",
         "events_checked": 0,
@@ -39,11 +42,17 @@ def sync_scores_and_settle(
         "quota_used": None,
         "quota_last": 0,
         "errors": [],
+        "settle_enabled": settle,
+        "selected_sports": selected_sports,
+        "sport_results": [],
+        "debug_steps": [{"step": "settlement_run_created", "settlement_run_id": run["id"], "at": run["started_at"]}],
     }
 
     try:
         completed_event_ids = []
-        for sport_key in SPORT_KEYS:
+        for sport_key in selected_sports:
+            sport_started_at = datetime.now(timezone.utc)
+            sport_report = {"sport_key": sport_key, "status": "started", "started_at": sport_started_at.isoformat()}
             try:
                 result = fetch_scores_for_sport(sport_key, days_from=days_from)
                 report["quota_remaining"] = result.get("quota_remaining")
@@ -51,6 +60,18 @@ def sync_scores_and_settle(
                 report["quota_last"] += result.get("quota_last") or 0
                 events = result["data"]
                 report["events_checked"] += len(events)
+                sport_report.update(
+                    {
+                        "request_url": result.get("request_url"),
+                        "quota_remaining": result.get("quota_remaining"),
+                        "quota_used": result.get("quota_used"),
+                        "quota_last": result.get("quota_last"),
+                        "api_events_count": len(events),
+                        "completed_from_api": sum(1 for event in events if event.get("completed")),
+                        "matched_events": 0,
+                        "updated_event_ids": [],
+                    }
+                )
                 for score_event in events:
                     if not score_event.get("completed"):
                         continue
@@ -58,11 +79,33 @@ def sync_scores_and_settle(
                     if event:
                         report["events_completed"] += 1
                         completed_event_ids.append(event["id"])
+                        sport_report["matched_events"] += 1
+                        sport_report["updated_event_ids"].append(event["id"])
+                sport_report.update(
+                    {
+                        "status": "success",
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "duration_seconds": round((datetime.now(timezone.utc) - sport_started_at).total_seconds(), 3),
+                    }
+                )
             except Exception as exc:
-                report["errors"].append({"sport_key": sport_key, "message": str(exc)})
+                error = exception_debug(exc)
+                error["sport_key"] = sport_key
+                report["errors"].append(error)
+                sport_report.update(
+                    {
+                        "status": "error",
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "duration_seconds": round((datetime.now(timezone.utc) - sport_started_at).total_seconds(), 3),
+                        "error": error,
+                    }
+                )
+            report["sport_results"].append(sport_report)
 
         if settle and completed_event_ids:
+            report["debug_steps"].append({"step": "settle_pending_bets_started", "event_ids": completed_event_ids, "at": now_iso()})
             report["bets_settled"] = settle_pending_bets(db, completed_event_ids)
+            report["debug_steps"].append({"step": "settle_pending_bets_done", "bets_settled": report["bets_settled"], "at": now_iso()})
 
         if report["errors"] and report["events_completed"]:
             report["status"] = "partial_success"
@@ -70,24 +113,29 @@ def sync_scores_and_settle(
             report["status"] = "error"
     except Exception as exc:
         report["status"] = "error"
-        report["errors"].append({"message": str(exc)})
+        report["errors"].append(exception_debug(exc))
     finally:
         error_message = "; ".join(error["message"] for error in report["errors"])[:1000] or None
-        db.update(
-            "settlement_runs",
-            {
-                "status": report["status"],
-                "events_checked": report["events_checked"],
-                "events_completed": report["events_completed"],
-                "bets_settled": report["bets_settled"],
-                "quota_remaining": report["quota_remaining"],
-                "quota_used": report["quota_used"],
-                "quota_last": report["quota_last"],
-                "error_message": error_message,
-                "finished_at": now_iso(),
-            },
-            {"id": f"eq.{run['id']}"},
-        )
+        try:
+            db.update(
+                "settlement_runs",
+                {
+                    "status": report["status"],
+                    "events_checked": report["events_checked"],
+                    "events_completed": report["events_completed"],
+                    "bets_settled": report["bets_settled"],
+                    "quota_remaining": report["quota_remaining"],
+                    "quota_used": report["quota_used"],
+                    "quota_last": report["quota_last"],
+                    "error_message": error_message,
+                    "finished_at": now_iso(),
+                },
+                {"id": f"eq.{run['id']}"},
+            )
+            report["debug_steps"].append({"step": "settlement_run_updated", "at": now_iso()})
+        except Exception as exc:
+            report["status"] = "error"
+            report["errors"].append({"stage": "settlement_run_update", **exception_debug(exc)})
 
     latest = first(db.select("settlement_runs", {"select": "*", "id": f"eq.{run['id']}", "limit": "1"}))
     return {**report, "run": latest}
@@ -295,3 +343,11 @@ def result_winner(home_score: int, away_score: int) -> str:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def exception_debug(exc: Exception) -> dict[str, Any]:
+    return {
+        "type": exc.__class__.__name__,
+        "message": str(exc),
+        "traceback": "".join(format_exception(type(exc), exc, exc.__traceback__))[-5000:],
+    }
