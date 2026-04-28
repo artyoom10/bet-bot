@@ -90,6 +90,12 @@ create table if not exists events (
   status text not null default 'upcoming',
   raw_payload jsonb,
   last_odds_sync_at timestamptz,
+  home_score integer,
+  away_score integer,
+  result_winner text,
+  result_payload jsonb,
+  result_last_update timestamptz,
+  settled_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique(source, external_event_id)
@@ -140,6 +146,8 @@ create table if not exists bets (
   possible_win numeric(18, 2) not null,
   status text not null default 'pending',
   bet_type text not null default 'single',
+  payout numeric(18, 2),
+  settlement_note text,
   created_at timestamptz not null default now(),
   settled_at timestamptz
 );
@@ -209,6 +217,23 @@ create table if not exists admin_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists settlement_runs (
+  id uuid primary key default gen_random_uuid(),
+  source text not null default 'odds_api_scores',
+  status text not null default 'started',
+  triggered_by text,
+  triggered_by_user_id uuid references users(id),
+  events_checked integer default 0,
+  events_completed integer default 0,
+  bets_settled integer default 0,
+  quota_remaining integer,
+  quota_used integer,
+  quota_last integer,
+  error_message text,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz
+);
+
 create index if not exists idx_users_tg_id on users(tg_id);
 create index if not exists idx_wallets_user_id on wallets(user_id);
 create index if not exists idx_wallet_transactions_user_created on wallet_transactions(user_id, created_at desc);
@@ -226,3 +251,4 @@ create index if not exists idx_bet_selections_bet_id on bet_selections(bet_id);
 create index if not exists idx_sync_runs_started_at on sync_runs(started_at desc);
 create index if not exists idx_odds_api_usage_created_at on odds_api_usage(created_at desc);
 create index if not exists idx_admin_logs_created_at on admin_logs(created_at desc);
+create index if not exists idx_settlement_runs_started_at on settlement_runs(started_at desc);

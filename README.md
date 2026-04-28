@@ -14,6 +14,7 @@ SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 ODDS_API_KEY=
 ADMIN_TELEGRAM_IDS=
+DEBUG_ADMIN=0
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, and `ODDS_API_KEY` are backend-only secrets.
@@ -24,6 +25,32 @@ Run these files in the Supabase SQL editor:
 
 1. `supabase/schema.sql`
 2. `supabase/seed.sql`
+
+For an existing database, also run:
+
+```sql
+-- supabase/migrations/20260428_results_and_express.sql
+```
+
+This adds result fields, payout fields, express settlement status, logo support, and `settlement_runs`.
+
+## Admin endpoints
+
+- `POST /api/admin/sync-odds`
+- `POST /api/admin/refresh-odds-usage`
+- `GET /api/admin/users`
+- `POST /api/admin/users`
+- `PATCH /api/admin/users/:id`
+- `GET /api/admin/events`
+- `GET /api/admin/aliases`
+- `POST /api/admin/team-aliases`
+- `PATCH /api/admin/teams/:id`
+- `POST /api/admin/sync-scores`
+- `POST /api/admin/settle-bets`
+- `POST /api/admin/sync-scores-and-settle`
+- `POST /api/admin/events/:id/manual-result`
+
+The scores sync uses The Odds API `/scores` endpoint. With `daysFrom=3` it costs 2 credits; without `daysFrom` it costs 1 credit. Some leagues may return incomplete coverage, so the admin UI also has manual result entry.
 
 ## Local run
 

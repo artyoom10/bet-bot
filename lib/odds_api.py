@@ -53,6 +53,37 @@ def refresh_usage() -> dict[str, Any]:
     }
 
 
+def fetch_scores_for_sport(
+    sport_key: str,
+    days_from: int = 3,
+    event_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    api_key = env("ODDS_API_KEY")
+    if not api_key:
+        raise AppError("odds_api_not_configured", "ODDS_API_KEY is not configured", 500)
+
+    params: dict[str, Any] = {
+        "apiKey": api_key,
+        "dateFormat": "iso",
+    }
+    if days_from:
+        params["daysFrom"] = min(max(int(days_from), 1), 3)
+    if event_ids:
+        params["eventIds"] = ",".join(event_ids)
+
+    response = requests.get(f"{BASE_URL}/sports/{sport_key}/scores", params=params, timeout=30)
+    if response.status_code >= 400:
+        raise AppError("odds_api_error", f"Odds API scores returned {response.status_code}: {response.text[:300]}", 502)
+
+    return {
+        "data": response.json(),
+        "quota_remaining": header_int(response, "x-requests-remaining"),
+        "quota_used": header_int(response, "x-requests-used"),
+        "quota_last": header_int(response, "x-requests-last"),
+        "request_url": response.url.replace(api_key, "***"),
+    }
+
+
 def header_int(response: requests.Response, name: str) -> int | None:
     value = response.headers.get(name)
     if value is None:

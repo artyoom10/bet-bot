@@ -13,6 +13,7 @@ from lib.config import admin_tg_ids, app_name
 from lib.errors import AppError, error_response
 from lib.events import default_sports, get_events_for_app, get_sports_for_app
 from lib.odds_sync import refresh_odds_usage, run_odds_sync
+from lib.settlement import get_settlement_runs, manual_result_and_settle, settle_pending_bets, sync_scores_and_settle
 from lib.supabase_client import get_db
 from lib.telegram_auth import get_verified_telegram_user
 from lib.users import ensure_active_user, first, get_or_create_wallet, upsert_user_from_tg
@@ -68,22 +69,22 @@ def api_me():
     if matched_admin_env and not user.get("is_admin"):
         user["is_admin"] = True
 
-    return jsonify(
-        {
-            "ok": True,
-            "user": public_user(user),
-            "wallet": public_wallet(wallet),
-            "admin_debug": {
-                "tg_id": tg_id,
-                "is_admin_from_db": is_admin_from_db,
-                "matched_admin_env": matched_admin_env,
-                "is_admin_final": bool(user.get("is_admin") or matched_admin_env),
-                "admin_ids_configured": len(admin_tg_ids()),
-                "profile_loaded": profile_error is None,
-                "profile_error": profile_error,
-            },
+    response = {
+        "ok": True,
+        "user": public_user(user),
+        "wallet": public_wallet(wallet),
+    }
+    if os.getenv("DEBUG_ADMIN") == "1":
+        response["admin_debug"] = {
+            "tg_id": tg_id,
+            "is_admin_from_db": is_admin_from_db,
+            "matched_admin_env": matched_admin_env,
+            "is_admin_final": bool(user.get("is_admin") or matched_admin_env),
+            "admin_ids_configured": len(admin_tg_ids()),
+            "profile_loaded": profile_error is None,
+            "profile_error": profile_error,
         }
-    )
+    return jsonify(response)
 
 
 @app.get("/api/wallet")
@@ -140,15 +141,18 @@ def api_place_bet():
     ensure_active_user(user)
     payload = request.get_json(silent=True) or {}
 
-    result = place_bet(
-        db,
-        user,
-        event_id=payload.get("event_id", ""),
-        bookmaker_key=payload.get("bookmaker_key", ""),
-        market_key=payload.get("market_key", "h2h"),
-        selection_key=payload.get("selection_key", ""),
-        amount=float(payload.get("amount", 0)),
-    )
+    selections = payload.get("selections")
+    if not selections:
+        selections = [
+            {
+                "event_id": payload.get("event_id", ""),
+                "bookmaker_key": payload.get("bookmaker_key", ""),
+                "market_key": payload.get("market_key", "h2h"),
+                "selection_key": payload.get("selection_key", ""),
+            }
+        ]
+
+    result = place_bet(db, user, amount=float(payload.get("amount", 0)), selections=selections)
 
     bet = result["bet"]
     return jsonify(
@@ -174,7 +178,7 @@ def api_admin_dashboard():
     users = db.select("users", {"select": "id", "limit": "10000"})
     events = db.select("events", {"select": "id", "status": "eq.upcoming", "limit": "10000"})
     pending_bets = db.select("bets", {"select": "id,amount", "status": "eq.pending", "limit": "10000"})
-    last_sync = first(db.select("sync_runs", {"select": "*", "order": "started_at.desc", "limit": "1"}))
+    last_sync = normalize_last_sync(first(db.select("sync_runs", {"select": "*", "order": "started_at.desc", "limit": "1"})))
     usage = first(db.select("odds_api_usage", {"select": "*", "order": "created_at.desc", "limit": "1"}))
 
     return jsonify(
@@ -247,6 +251,14 @@ def api_admin_users():
     return jsonify(list_admin_users(db))
 
 
+@app.get("/api/admin/events")
+def api_admin_events():
+    db = get_db()
+    require_admin(request, db)
+    events = db.select("events", {"select": "*", "order": "commence_time.desc", "limit": "100"})
+    return jsonify(events)
+
+
 @app.post("/api/admin/users")
 def api_admin_create_user():
     db = get_db()
@@ -261,6 +273,60 @@ def api_admin_update_user(user_id: str):
     admin_user = require_admin(request, db)
     payload = request.get_json(silent=True) or {}
     return jsonify({"ok": True, **update_admin_user(db, admin_user, user_id, payload)})
+
+
+@app.post("/api/admin/sync-scores-and-settle")
+def api_admin_sync_scores_and_settle():
+    db = get_db()
+    admin_user = require_admin(request, db)
+    payload = request.get_json(silent=True) or {}
+    result = sync_scores_and_settle(db, admin_user, days_from=int(payload.get("days_from", 3)))
+    return jsonify({"ok": True, "settlement": result})
+
+
+@app.post("/api/admin/sync-scores")
+def api_admin_sync_scores():
+    db = get_db()
+    admin_user = require_admin(request, db)
+    payload = request.get_json(silent=True) or {}
+    result = sync_scores_and_settle(db, admin_user, days_from=int(payload.get("days_from", 3)), settle=False)
+    return jsonify({"ok": True, "settlement": result})
+
+
+@app.post("/api/admin/settle-bets")
+def api_admin_settle_bets():
+    db = get_db()
+    require_admin(request, db)
+    settled = settle_pending_bets(db)
+    return jsonify({"ok": True, "bets_settled": settled})
+
+
+@app.get("/api/admin/settlement-runs")
+def api_admin_settlement_runs():
+    db = get_db()
+    require_admin(request, db)
+    return jsonify(get_settlement_runs(db))
+
+
+@app.post("/api/admin/events/<event_id>/manual-result")
+def api_admin_manual_result(event_id: str):
+    db = get_db()
+    admin_user = require_admin(request, db)
+    payload = request.get_json(silent=True) or {}
+    try:
+        home_score = int(payload.get("home_score"))
+        away_score = int(payload.get("away_score"))
+    except (TypeError, ValueError) as exc:
+        raise AppError("invalid_score", "Введите корректный счет", 400) from exc
+
+    result = manual_result_and_settle(
+        db,
+        admin_user,
+        event_id,
+        home_score=home_score,
+        away_score=away_score,
+    )
+    return jsonify({"ok": True, "result": result})
 
 
 @app.get("/api/admin/aliases")
@@ -365,6 +431,7 @@ def public_user(user: dict[str, Any]) -> dict[str, Any]:
         "tg_id": user["tg_id"],
         "username": user.get("username"),
         "first_name": user.get("first_name"),
+        "last_name": user.get("last_name"),
         "client_status": user.get("client_status"),
         "is_blocked": user.get("is_blocked"),
         "is_admin": user.get("is_admin"),
@@ -386,6 +453,7 @@ def synthetic_user_from_tg(tg_user: dict[str, Any], is_admin: bool = False) -> d
         "tg_id": str(tg_user["tg_id"]),
         "username": tg_user.get("username"),
         "first_name": tg_user.get("first_name"),
+        "last_name": tg_user.get("last_name"),
         "client_status": "telegram_only",
         "is_blocked": False,
         "is_admin": is_admin,
@@ -399,6 +467,28 @@ def default_wallet() -> dict[str, Any]:
         "withdrawable_balance": 0,
         "locked_balance": 0,
     }
+
+
+def normalize_last_sync(sync: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not sync:
+        return None
+    item = {
+        "id": sync.get("id"),
+        "status": sync.get("status"),
+        "events_count": sync.get("events_count") or 0,
+        "odds_count": sync.get("odds_count") or 0,
+        "bookmakers_count": sync.get("bookmakers_count") or 0,
+        "quota_remaining": sync.get("quota_remaining"),
+        "quota_used": sync.get("quota_used"),
+        "quota_last": sync.get("quota_last"),
+        "started_at": sync.get("started_at"),
+        "finished_at": sync.get("finished_at"),
+        "error_message": sync.get("error_message"),
+    }
+    if item["status"] == "started" and not item["finished_at"]:
+        item["status"] = "stale"
+        item["error_message"] = item["error_message"] or "Sync did not finish correctly"
+    return item
 
 
 if __name__ == "__main__":

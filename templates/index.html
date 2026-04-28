@@ -15,9 +15,9 @@
           <h1>{{ app_name }}</h1>
         </div>
         <div class="top-actions">
-          <button class="admin-button admin-only" id="open-admin" hidden>Админ</button>
+          <button class="admin-button admin-only" id="open-admin" hidden>Админка</button>
           <div class="balance">
-            <span id="profile-name">Загрузка</span>
+            <span id="profile-name">Игрок</span>
             <strong id="balance-value">DEMO 0</strong>
           </div>
         </div>
@@ -28,8 +28,7 @@
         <button class="tab" data-tab="bets">Мои ставки</button>
       </nav>
 
-      <section class="status" id="status">Инициализация приложения...</section>
-      <section class="debug-panel" id="admin-debug" hidden></section>
+      <section class="status" id="status">Загрузка...</section>
 
       <section class="view active" id="view-events">
         <div class="sports-strip" id="sports"></div>
@@ -41,26 +40,28 @@
       </section>
     </main>
 
-    <aside class="bet-slip" id="bet-slip">
-      <div id="ticket-empty" class="muted">Выберите коэффициент</div>
-      <div id="ticket-form" hidden>
-        <div class="slip-main">
-          <div>
-            <p class="muted" id="ticket-event"></p>
-            <strong id="ticket-selection"></strong>
-          </div>
-          <strong class="slip-odd" id="ticket-price"></strong>
+    <aside class="bet-slip" id="bet-slip" hidden>
+      <button class="slip-compact" id="toggle-ticket" type="button"></button>
+      <div class="slip-full" id="ticket-form" hidden>
+        <div class="slip-head">
+          <h2>Купон</h2>
+          <button type="button" id="clear-ticket">Очистить</button>
+        </div>
+        <div class="ticket-list" id="ticket-list"></div>
+        <div class="ticket-total">
+          <span id="ticket-type">Ординар</span>
+          <strong id="ticket-odds">1.00</strong>
         </div>
         <div class="slip-controls">
           <label>
-            Сумма
+            Сумма ставки
             <input id="stake" type="number" min="10" step="10" value="100">
           </label>
           <div>
-            <span class="muted">Выигрыш</span>
-            <strong id="ticket-win"></strong>
+            <span class="muted">Возможный выигрыш</span>
+            <strong id="ticket-win">DEMO 0</strong>
           </div>
-          <button class="primary" id="place-bet">Поставить</button>
+          <button class="primary" id="place-bet">Сделать ставку</button>
         </div>
       </div>
     </aside>
@@ -70,40 +71,55 @@
       <header class="drawer-head">
         <div>
           <p class="label">Панель</p>
-          <h2>Админка</h2>
+          <h2 id="admin-title">Админка</h2>
         </div>
         <button id="close-admin">Закрыть</button>
       </header>
 
-      <nav class="drawer-tabs">
-        <button class="drawer-tab active" data-admin-view="overview">Обзор</button>
-        <button class="drawer-tab" data-admin-view="users">Пользователи</button>
-        <button class="drawer-tab" data-admin-view="aliases">Алиасы</button>
-      </nav>
+      <section class="admin-page active" id="admin-page-menu">
+        <button class="admin-link" data-admin-link="sync">🔄 Синхронизация линии</button>
+        <button class="admin-link" data-admin-link="api-usage">📊 Статистика API</button>
+        <button class="admin-link" data-admin-link="users">👥 Пользователи</button>
+        <button class="admin-link" data-admin-link="aliases">🏷 Алиасы и команды</button>
+        <button class="admin-link" data-admin-link="results">🏁 Расчёт ставок / результаты</button>
+      </section>
 
-      <section class="drawer-view active" id="admin-view-overview">
+      <section class="admin-page" id="admin-page-sync">
+        <button class="back-button" data-admin-back>Назад</button>
         <div class="admin-actions">
-          <button class="primary" id="sync-odds">Обновить матчи</button>
-          <button id="refresh-usage">Обновить лимиты API</button>
+          <button class="primary" id="sync-odds">Обновить матчи и коэффициенты</button>
         </div>
         <article class="panel">
-          <h2>Обзор</h2>
+          <h2>Последний sync</h2>
           <div id="admin-dashboard" class="stack"></div>
         </article>
         <article class="panel">
-          <h2>Последние sync</h2>
+          <h2>Последние запуски</h2>
           <div id="sync-runs" class="stack"></div>
         </article>
       </section>
 
-      <section class="drawer-view" id="admin-view-users">
+      <section class="admin-page" id="admin-page-api-usage">
+        <button class="back-button" data-admin-back>Назад</button>
+        <div class="admin-actions">
+          <button class="primary" id="refresh-usage">Обновить статистику Odds API</button>
+        </div>
+        <article class="panel">
+          <h2>Лимиты API</h2>
+          <div id="api-usage" class="stack"></div>
+        </article>
+      </section>
+
+      <section class="admin-page" id="admin-page-users">
+        <button class="back-button" data-admin-back>Назад</button>
         <div class="admin-actions">
           <button class="primary" id="open-create-user">Добавить пользователя</button>
         </div>
         <div class="stack" id="admin-users"></div>
       </section>
 
-      <section class="drawer-view" id="admin-view-aliases">
+      <section class="admin-page" id="admin-page-aliases">
+        <button class="back-button" data-admin-back>Назад</button>
         <div class="admin-actions">
           <button class="primary" id="reload-aliases">Обновить алиасы</button>
         </div>
@@ -120,6 +136,30 @@
           <div class="stack" id="team-aliases"></div>
         </article>
       </section>
+
+      <section class="admin-page" id="admin-page-results">
+        <button class="back-button" data-admin-back>Назад</button>
+        <div class="admin-actions">
+          <button class="primary" id="sync-results">Обновить результаты и рассчитать ставки</button>
+        </div>
+        <article class="panel">
+          <h2>Отчёт</h2>
+          <div id="settlement-report" class="stack"></div>
+        </article>
+        <article class="panel">
+          <h2>Ручной расчёт</h2>
+          <div class="form-grid">
+            <select id="manual-event"></select>
+            <input id="manual-home-score" type="number" min="0" placeholder="Счёт хозяев">
+            <input id="manual-away-score" type="number" min="0" placeholder="Счёт гостей">
+            <button class="primary" id="manual-settle">Рассчитать вручную</button>
+          </div>
+        </article>
+        <article class="panel">
+          <h2>Последние расчёты</h2>
+          <div id="settlement-runs" class="stack"></div>
+        </article>
+      </section>
     </aside>
 
     <div class="modal" id="create-user-modal" hidden>
@@ -128,26 +168,11 @@
           <h2>Добавить пользователя</h2>
           <button type="button" id="close-create-user">Закрыть</button>
         </div>
-        <label>
-          Telegram ID
-          <input name="tg_id" autocomplete="off" placeholder="123456789">
-        </label>
-        <label>
-          Username
-          <input name="username" autocomplete="off" placeholder="username без @">
-        </label>
-        <label>
-          Имя
-          <input name="first_name" required autocomplete="off">
-        </label>
-        <label>
-          Фамилия
-          <input name="last_name" autocomplete="off">
-        </label>
-        <label>
-          Баланс DEMO
-          <input name="balance" type="number" min="0" step="10" value="1000" required>
-        </label>
+        <label>Telegram ID <input name="tg_id" autocomplete="off" placeholder="123456789"></label>
+        <label>Username <input name="username" autocomplete="off" placeholder="username без @"></label>
+        <label>Имя <input name="first_name" required autocomplete="off"></label>
+        <label>Фамилия <input name="last_name" autocomplete="off"></label>
+        <label>Баланс DEMO <input name="balance" type="number" min="0" step="10" value="1000" required></label>
         <button class="primary" type="submit">Создать</button>
       </form>
     </div>

@@ -7,6 +7,7 @@ from uuid import uuid4
 from lib.errors import AppError
 from lib.odds_sync import log_admin_action
 from lib.supabase_client import SupabaseRestClient
+from lib.team_mapping import apply_all_aliases_for_team, apply_team_alias_to_existing_events
 from lib.users import first
 
 
@@ -85,6 +86,7 @@ def update_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], team_i
     team = first(db.update("teams", patch, {"id": f"eq.{team_id}"}))
     if not team:
         raise AppError("team_not_found", "Команда не найдена", 404)
+    apply_all_aliases_for_team(db, team_id)
     log_admin_action(db, admin_user, "update_team_alias", "team", team_id, patch)
     return team
 
@@ -94,6 +96,7 @@ def create_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], payloa
     sport_key = clean_text(payload.get("sport_key"))
     name_ru = clean_text(payload.get("name_ru"))
     short_name_ru = clean_text(payload.get("short_name_ru"))
+    logo_url = clean_text(payload.get("logo_url"))
     if not raw_name or not sport_key or not name_ru:
         raise AppError("invalid_alias", "Нужны raw_name, sport_key и русское название", 400)
 
@@ -105,6 +108,7 @@ def create_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], payloa
                 "name_ru": name_ru,
                 "short_name_ru": short_name_ru or name_ru,
                 "slug": f"{slugify(raw_name)}-{uuid4().hex[:8]}",
+                "logo_url": logo_url or None,
                 "sport_type": "soccer",
             },
         )
@@ -124,6 +128,7 @@ def create_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], payloa
             "source,sport_key,raw_name",
         )
     )
+    apply_team_alias_to_existing_events(db, sport_key, raw_name, team["id"])
     log_admin_action(db, admin_user, "create_team_alias", "team", team["id"], {"raw_name": raw_name, "sport_key": sport_key})
     return {"team": team, "alias": alias}
 

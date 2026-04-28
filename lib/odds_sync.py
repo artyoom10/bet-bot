@@ -37,7 +37,8 @@ def run_odds_sync(
     admin_user: dict[str, Any] | None = None,
     sport_keys: list[str] | None = None,
 ) -> dict[str, Any]:
-    started_after = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    mark_stale_syncs(db)
+    started_after = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
     active = first(
         db.select(
             "sync_runs",
@@ -52,9 +53,6 @@ def run_odds_sync(
     if active:
         raise AppError("sync_already_running", "Синхронизация уже запущена. Подождите несколько минут.", 409)
 
-    selected_sports = sport_keys or SPORT_KEYS
-    ensure_sports_seed(db, selected_sports)
-
     sync_run = first(
         db.insert(
             "sync_runs",
@@ -68,6 +66,7 @@ def run_odds_sync(
     if not sync_run:
         raise AppError("sync_run_create_failed", "Could not create sync run", 500)
 
+    selected_sports = sport_keys or SPORT_KEYS
     totals = {
         "sports_count": len(selected_sports),
         "success_sports": 0,
@@ -83,50 +82,57 @@ def run_odds_sync(
     }
 
     request_urls = []
-    for sport_key in selected_sports:
-        try:
-            result = sync_single_sport(db, sport_key)
-            totals["success_sports"] += 1
-            totals["events_count"] += result["events_count"]
-            totals["odds_count"] += result["odds_count"]
-            totals["bookmakers_count"] += result["bookmakers_count"]
-            totals["quota_last_total"] += result.get("quota_last") or 0
-            totals["quota_remaining"] = result.get("quota_remaining")
-            totals["quota_used"] = result.get("quota_used")
-            request_urls.append(result.get("request_url"))
-        except Exception as exc:
-            totals["failed_sports"] += 1
-            totals["errors"].append({"sport_key": sport_key, "message": str(exc)})
-
     status = "success"
-    if totals["failed_sports"] and totals["success_sports"]:
-        status = "partial_success"
-    elif totals["failed_sports"] and not totals["success_sports"]:
+    try:
+        ensure_sports_seed(db, selected_sports)
+        for sport_key in selected_sports:
+            try:
+                result = sync_single_sport(db, sport_key)
+                totals["success_sports"] += 1
+                totals["events_count"] += result["events_count"]
+                totals["odds_count"] += result["odds_count"]
+                totals["bookmakers_count"] += result["bookmakers_count"]
+                totals["quota_last_total"] += result.get("quota_last") or 0
+                totals["quota_remaining"] = result.get("quota_remaining")
+                totals["quota_used"] = result.get("quota_used")
+                request_urls.append(result.get("request_url"))
+            except Exception as exc:
+                totals["failed_sports"] += 1
+                totals["errors"].append({"sport_key": sport_key, "message": str(exc)})
+
+        if totals["failed_sports"] and totals["success_sports"]:
+            status = "partial_success"
+        elif totals["failed_sports"] and not totals["success_sports"]:
+            status = "error"
+    except Exception as exc:
         status = "error"
+        totals["errors"].append({"message": str(exc)})
+    finally:
+        finished_at = datetime.now(timezone.utc).isoformat()
+        db.update(
+            "sync_runs",
+            {
+                "status": status,
+                "request_url": "\n".join([url for url in request_urls if url]),
+                "events_count": totals["events_count"],
+                "odds_count": totals["odds_count"],
+                "bookmakers_count": totals["bookmakers_count"],
+                "quota_remaining": totals["quota_remaining"],
+                "quota_used": totals["quota_used"],
+                "quota_last": totals["quota_last_total"],
+                "error_message": "; ".join(error["message"] for error in totals["errors"])[:1000] or None,
+                "finished_at": finished_at,
+            },
+            {"id": f"eq.{sync_run['id']}"},
+        )
 
-    finished_at = datetime.now(timezone.utc).isoformat()
-    db.update(
-        "sync_runs",
-        {
-            "status": status,
-            "request_url": "\n".join([url for url in request_urls if url]),
-            "events_count": totals["events_count"],
-            "odds_count": totals["odds_count"],
-            "bookmakers_count": totals["bookmakers_count"],
-            "quota_remaining": totals["quota_remaining"],
-            "quota_used": totals["quota_used"],
-            "quota_last": totals["quota_last_total"],
-            "error_message": "; ".join(error["message"] for error in totals["errors"])[:1000] or None,
-            "finished_at": finished_at,
-        },
-        {"id": f"eq.{sync_run['id']}"},
-    )
-
+    latest = first(db.select("sync_runs", {"select": "*", "id": f"eq.{sync_run['id']}", "limit": "1"}))
     if admin_user:
         log_admin_action(db, admin_user, "sync_odds", "sync_run", sync_run["id"], totals)
 
     totals["status"] = status
-    totals["finished_at"] = finished_at
+    totals["finished_at"] = latest.get("finished_at") if latest else finished_at
+    totals["run"] = latest
     return totals
 
 
@@ -259,6 +265,29 @@ def ensure_sports_seed(db: SupabaseRestClient, sport_keys: list[str]) -> None:
             }
         )
     db.upsert("sports", rows, "sport_key")
+
+
+def mark_stale_syncs(db: SupabaseRestClient) -> None:
+    stale_before = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    stale = db.select(
+        "sync_runs",
+        {
+            "select": "id",
+            "status": "eq.started",
+            "started_at": f"lt.{stale_before}",
+            "limit": "100",
+        },
+    )
+    for row in stale:
+        db.update(
+            "sync_runs",
+            {
+                "status": "error",
+                "error_message": "Sync did not finish within 10 minutes",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            },
+            {"id": f"eq.{row['id']}"},
+        )
 
 
 def refresh_odds_usage(db: SupabaseRestClient, admin_user: dict[str, Any]) -> dict[str, Any]:
