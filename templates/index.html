@@ -28,7 +28,7 @@
         <button class="tab" data-tab="bets">Мои ставки</button>
       </nav>
 
-      <section class="status" id="status">Загрузка...</section>
+      <section class="status" id="status" hidden></section>
 
       <section class="view active" id="view-events">
         <div class="sports-strip" id="sports"></div>
@@ -77,11 +77,11 @@
       </header>
 
       <section class="admin-page active" id="admin-page-menu">
-        <button class="admin-link" data-admin-link="sync">🔄 Синхронизация линии</button>
-        <button class="admin-link" data-admin-link="api-usage">📊 Статистика API</button>
-        <button class="admin-link" data-admin-link="users">👥 Пользователи</button>
-        <button class="admin-link" data-admin-link="aliases">🏷 Алиасы и команды</button>
-        <button class="admin-link" data-admin-link="results">🏁 Расчёт ставок / результаты</button>
+        <button class="admin-link" data-admin-link="sync">Синхронизация линии</button>
+        <button class="admin-link" data-admin-link="api-usage">Статистика API</button>
+        <button class="admin-link" data-admin-link="users">Пользователи</button>
+        <button class="admin-link" data-admin-link="aliases">Алиасы и команды</button>
+        <button class="admin-link" data-admin-link="results">Расчёт ставок / результаты</button>
       </section>
 
       <section class="admin-page" id="admin-page-sync">
@@ -175,6 +175,21 @@
         <label>Баланс DEMO <input name="balance" type="number" min="0" step="10" value="1000" required></label>
         <button class="primary" type="submit">Создать</button>
       </form>
+    </div>
+
+    <div class="loading-modal" id="loading-modal" hidden aria-live="polite" aria-busy="true">
+      <div class="loading-card">
+        <div class="spinner"></div>
+        <h2 id="loading-title">Загрузка</h2>
+        <p id="loading-text">Подождите, операция выполняется.</p>
+      </div>
+    </div>
+
+    <div class="blocked-screen" id="blocked-screen" hidden>
+      <div class="blocked-card">
+        <h2>Аккаунт заблокирован</h2>
+        <p id="blocked-reason">Доступ к приложению временно ограничен.</p>
+      </div>
     </div>
 
     <script src="{{ url_for('static', filename='app.js') }}"></script>

@@ -33,6 +33,10 @@ def upsert_user_from_tg(db: SupabaseRestClient, tg_user: dict[str, Any]) -> dict
     }
 
     if existing:
+        payload["username"] = existing.get("username") or tg_user.get("username")
+        payload["first_name"] = existing.get("first_name") or tg_user.get("first_name")
+        payload["last_name"] = existing.get("last_name") or tg_user.get("last_name")
+        payload["client_status"] = existing.get("client_status") or "active"
         if is_env_admin and not existing.get("is_admin"):
             payload["is_admin"] = True
         updated = db.update("users", payload, {"id": f"eq.{existing['id']}"})

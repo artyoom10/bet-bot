@@ -460,6 +460,7 @@ def public_user(user: dict[str, Any]) -> dict[str, Any]:
         "last_name": user.get("last_name"),
         "client_status": user.get("client_status"),
         "is_blocked": user.get("is_blocked"),
+        "block_reason": user.get("block_reason"),
         "is_admin": user.get("is_admin"),
     }
 

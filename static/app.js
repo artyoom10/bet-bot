@@ -39,6 +39,29 @@ function status(message) {
   root.hidden = !message;
 }
 
+function showLoading(title, text = 'Подождите, операция выполняется.') {
+  document.querySelector('#loading-title').textContent = title;
+  document.querySelector('#loading-text').textContent = text;
+  document.querySelector('#loading-modal').hidden = false;
+}
+
+function updateLoading(text) {
+  document.querySelector('#loading-text').textContent = text;
+}
+
+function hideLoading() {
+  document.querySelector('#loading-modal').hidden = true;
+}
+
+function showBlockedScreen(reason) {
+  document.querySelector('.page').hidden = true;
+  document.querySelector('#bet-slip').hidden = true;
+  document.querySelector('#admin-drawer').classList.remove('open');
+  document.querySelector('#admin-backdrop').hidden = true;
+  document.querySelector('#blocked-reason').textContent = reason || 'Доступ к приложению временно ограничен.';
+  document.querySelector('#blocked-screen').hidden = false;
+}
+
 async function apiFetch(path, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
@@ -66,7 +89,11 @@ async function apiFetch(path, options = {}) {
 }
 
 async function init() {
-  await loadMe().catch((error) => status(`Профиль не загружен: ${error.message}`));
+  const canUseApp = await loadMe().catch((error) => {
+    status(`Профиль не загружен: ${error.message}`);
+    return false;
+  });
+  if (!canUseApp) return;
   await loadSports().catch((error) => status(`Турниры не загружены: ${error.message}`));
   await loadEvents().catch((error) => status(`Линия не загружена: ${error.message}`));
   handleHash();
@@ -80,7 +107,12 @@ async function loadMe() {
   document.querySelectorAll('.admin-only').forEach((item) => {
     item.hidden = !data.user.is_admin;
   });
+  if (data.user.is_blocked) {
+    showBlockedScreen(data.user.block_reason);
+    return false;
+  }
   status('');
+  return true;
 }
 
 function resolveProfileName(data) {
@@ -173,7 +205,7 @@ function teamLine(team) {
 
 function teamLogo(team) {
   if (!team?.logo_url) return `<span class="team-logo placeholder">${escapeHtml((team?.name || 'Ф')[0])}</span>`;
-  return `<img class="team-logo" src="${escapeAttr(team.logo_url)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'team-logo placeholder', textContent: '⚽'}))">`;
+  return `<img class="team-logo" src="${escapeAttr(team.logo_url)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'team-logo placeholder', textContent: '${escapeAttr((team?.name || 'Ф')[0])}'}))">`;
 }
 
 function toggleSelection(button) {
@@ -337,28 +369,32 @@ function renderSyncRuns(runs) {
 }
 
 async function syncOdds() {
-  status('Синхронизация линии запущена...');
+  showLoading('Синхронизация линии', 'Подготавливаю турниры...');
   const responses = [];
-  for (const sportKey of syncSportKeys()) {
-    status(`Синхронизация линии: ${sportTitle(sportKey)}`);
-    try {
-      const result = await apiFetch('/api/admin/sync-odds', {
-        method: 'POST',
-        body: JSON.stringify({ sport_keys: [sportKey] }),
-      });
-      responses.push({ sport_key: sportKey, ok: true, result });
-    } catch (error) {
-      responses.push({ sport_key: sportKey, ok: false, message: error.message, data: error.data || null, responseText: error.responseText || null });
+  try {
+    for (const sportKey of syncSportKeys()) {
+      updateLoading(`Обновляю: ${sportTitle(sportKey)}`);
+      try {
+        const result = await apiFetch('/api/admin/sync-odds', {
+          method: 'POST',
+          body: JSON.stringify({ sport_keys: [sportKey] }),
+        });
+        responses.push({ sport_key: sportKey, ok: true, result });
+      } catch (error) {
+        responses.push({ sport_key: sportKey, ok: false, message: error.message, data: error.data || null, responseText: error.responseText || null });
+      }
     }
+    const failed = responses.filter((item) => !item.ok);
+    const eventsCount = responses.reduce((sum, item) => sum + Number(item.result?.sync?.events_count || 0), 0);
+    const oddsCount = responses.reduce((sum, item) => sum + Number(item.result?.sync?.odds_count || 0), 0);
+    status(failed.length ? `Sync завершён с ошибками: ${failed.length}. Событий: ${eventsCount}, кэфов: ${oddsCount}` : `Sync завершён. Событий: ${eventsCount}, кэфов: ${oddsCount}`);
+    await loadSports().catch(() => {});
+    await loadEvents().catch(() => {});
+    await loadAdmin().catch(() => {});
+    renderSyncDebug({ kind: 'sync_odds_by_sport', responses }, '#admin-dashboard');
+  } finally {
+    hideLoading();
   }
-  const failed = responses.filter((item) => !item.ok);
-  const eventsCount = responses.reduce((sum, item) => sum + Number(item.result?.sync?.events_count || 0), 0);
-  const oddsCount = responses.reduce((sum, item) => sum + Number(item.result?.sync?.odds_count || 0), 0);
-  status(failed.length ? `Sync завершён с ошибками: ${failed.length}. Событий: ${eventsCount}, кэфов: ${oddsCount}` : `Sync завершён. Событий: ${eventsCount}, кэфов: ${oddsCount}`);
-  await loadSports().catch(() => {});
-  await loadEvents().catch(() => {});
-  await loadAdmin().catch(() => {});
-  renderSyncDebug({ kind: 'sync_odds_by_sport', responses }, '#admin-dashboard');
 }
 
 async function refreshUsage() {
@@ -447,11 +483,11 @@ function renderUnknownAliases(unknown) {
   const indexed = unknown.map((item, index) => ({ ...item, index }));
   const groups = groupBy(indexed, (item) => item.sport_key || 'Без турнира');
   root.innerHTML = indexed.length ? Object.entries(groups).map(([sportKey, items]) => `
-    <section class="alias-group">
-      <h3>${escapeHtml(sportTitle(sportKey))}</h3>
+    <details class="alias-group" open>
+      <summary><strong>${escapeHtml(sportTitle(sportKey))}</strong><span>${items.length}</span></summary>
       ${items.map((item) => `
         <article class="admin-card">
-          <div class="card-head"><strong>${escapeHtml(item.raw_name)}</strong><span>${escapeHtml(item.sport_key)}</span></div>
+          <div class="card-head"><strong>${escapeHtml(item.raw_name)}</strong></div>
           <div class="form-grid">
             <input data-unknown-name="${item.index}" placeholder="Название на русском">
             <input data-unknown-short="${item.index}" placeholder="Короткое название">
@@ -460,7 +496,7 @@ function renderUnknownAliases(unknown) {
           </div>
         </article>
       `).join('')}
-    </section>
+    </details>
   `).join('') : '<p class="muted">Нет пустых команд.</p>';
   document.querySelectorAll('[data-create-alias]').forEach((button) => button.addEventListener('click', () => createAlias(Number(button.dataset.createAlias))));
 }
@@ -468,7 +504,7 @@ function renderUnknownAliases(unknown) {
 function renderSportAliases(sports) {
   document.querySelector('#sport-aliases').innerHTML = sports.length ? sports.map((sport) => `
     <article class="admin-card">
-      <div class="card-head"><strong>${escapeHtml(sport.sport_key)}</strong><span>${sport.is_enabled ? 'active' : 'off'}</span></div>
+      <div class="card-head"><strong>${escapeHtml(sport.title_ru || sport.title_en || sport.sport_key)}</strong><span>${sport.is_enabled ? 'активен' : 'выключен'}</span></div>
       <div class="form-grid">
         <input data-sport-title="${sport.sport_key}" value="${escapeAttr(sport.title_ru || '')}" placeholder="Название на русском">
         <button class="primary" data-save-sport="${sport.sport_key}">Сохранить</button>
@@ -488,8 +524,8 @@ function renderTeamAliases(teams) {
   state.teamAliasRows = rows;
   const groups = groupBy(rows.map((row, index) => ({ ...row, index })), (row) => row.sport_key);
   document.querySelector('#team-aliases').innerHTML = rows.length ? Object.entries(groups).map(([sportKey, items]) => `
-    <section class="alias-group">
-      <h3>${escapeHtml(sportTitle(sportKey))}</h3>
+    <details class="alias-group" open>
+      <summary><strong>${escapeHtml(sportTitle(sportKey))}</strong><span>${items.length}</span></summary>
       ${items.map(({ team, aliases, index }) => `
         <article class="admin-card">
           <div class="card-head"><strong>${escapeHtml(team.name_en)}</strong><span>${escapeHtml((aliases || []).map((alias) => alias.raw_name).join(', '))}</span></div>
@@ -501,7 +537,7 @@ function renderTeamAliases(teams) {
           </div>
         </article>
       `).join('')}
-    </section>
+    </details>
   `).join('') : '<p class="muted">Команды появятся после заполнения алиасов.</p>';
   document.querySelectorAll('[data-save-team-index]').forEach((button) => button.addEventListener('click', () => saveTeam(Number(button.dataset.saveTeamIndex))));
 }
@@ -549,27 +585,31 @@ async function saveTeam(index) {
 }
 
 async function syncResults() {
-  status('Обновляю результаты...');
+  showLoading('Расчёт результатов', 'Запрашиваю результаты матчей...');
   const responses = [];
-  for (const sportKey of syncSportKeys()) {
-    status(`Результаты: ${sportTitle(sportKey)}`);
-    try {
-      const result = await apiFetch('/api/admin/sync-scores-and-settle', {
-        method: 'POST',
-        body: JSON.stringify({ days_from: 3, sport_keys: [sportKey] }),
-      });
-      responses.push({ sport_key: sportKey, ok: true, result });
-    } catch (error) {
-      responses.push({ sport_key: sportKey, ok: false, message: error.message, data: error.data || null, responseText: error.responseText || null });
+  try {
+    for (const sportKey of syncSportKeys()) {
+      updateLoading(`Проверяю: ${sportTitle(sportKey)}`);
+      try {
+        const result = await apiFetch('/api/admin/sync-scores-and-settle', {
+          method: 'POST',
+          body: JSON.stringify({ days_from: 3, sport_keys: [sportKey] }),
+        });
+        responses.push({ sport_key: sportKey, ok: true, result });
+      } catch (error) {
+        responses.push({ sport_key: sportKey, ok: false, message: error.message, data: error.data || null, responseText: error.responseText || null });
+      }
     }
+    const summary = summarizeSettlementResponses(responses);
+    renderSettlementReport(summary);
+    renderSyncDebug({ kind: 'sync_scores_by_sport', responses }, '#settlement-report');
+    const failed = responses.filter((item) => !item.ok);
+    status(failed.length ? `Расчёт завершён с ошибками: ${failed.length}` : 'Расчёт результатов завершён');
+    await loadSettlementRuns().catch(() => {});
+    await loadBets().catch(() => {});
+  } finally {
+    hideLoading();
   }
-  const summary = summarizeSettlementResponses(responses);
-  renderSettlementReport(summary);
-  renderSyncDebug({ kind: 'sync_scores_by_sport', responses }, '#settlement-report');
-  const failed = responses.filter((item) => !item.ok);
-  status(failed.length ? `Расчёт завершён с ошибками: ${failed.length}` : 'Расчёт результатов завершён');
-  await loadSettlementRuns().catch(() => {});
-  await loadBets().catch(() => {});
 }
 
 function renderSettlementReport(report) {
