@@ -31,11 +31,6 @@
         </div>
       </header>
 
-      <nav class="main-tabs">
-        <button class="tab active" data-tab="events">Линия</button>
-        <button class="tab" data-tab="bets">Мои ставки</button>
-      </nav>
-
       <section class="status" id="status" hidden></section>
 
       <section class="view active" id="view-events">
@@ -46,7 +41,27 @@
       <section class="view" id="view-bets">
         <div class="events-list" id="bets"></div>
       </section>
+
+      <section class="view" id="view-history">
+        <div class="events-list" id="history"></div>
+      </section>
+
+      <section class="view" id="view-profile">
+        <article class="profile-page-card">
+          <p class="label">Профиль</p>
+          <h2 id="profile-view-name">Игрок</h2>
+          <div class="profile-balance" id="profile-view-balance">DEMO 0</div>
+          <div class="stack" id="profile-view-info"></div>
+        </article>
+      </section>
     </main>
+
+    <nav class="bottom-nav" aria-label="Основная навигация">
+      <button class="tab active" data-tab="events">Линия</button>
+      <button class="tab" data-tab="bets">Мои пари</button>
+      <button class="tab" data-tab="history">История</button>
+      <button class="tab" data-tab="profile">Профиль</button>
+    </nav>
 
     <aside class="bet-slip" id="bet-slip" hidden>
       <button class="slip-compact" id="toggle-ticket" type="button"></button>
@@ -92,6 +107,7 @@
         <button class="admin-link" data-admin-link="api-usage">Статистика API</button>
         <button class="admin-link" data-admin-link="users">Пользователи</button>
         <button class="admin-link" data-admin-link="aliases">Алиасы и команды</button>
+        <button class="admin-link" data-admin-link="constructor">Конструктор событий</button>
         <button class="admin-link" data-admin-link="results">Расчёт ставок / результаты</button>
       </section>
 
@@ -167,49 +183,120 @@
           </div>
         </article>
         <article class="panel">
-          <h2>Конструктор матчей</h2>
-          <form class="form-grid" id="manual-event-form">
-            <label>Вид спорта
-              <select id="manual-event-type">
-                <option value="soccer">Футбол</option>
-              </select>
-            </label>
-            <label>Соревнование
-              <select id="manual-event-sport"></select>
-            </label>
-            <label>Новое соревнование
-              <input id="manual-event-sport-new" placeholder="Например, Кубок теста">
-            </label>
-            <label>Команда 1
-              <select id="manual-event-home"></select>
-            </label>
-            <label>Новая команда 1
-              <input id="manual-event-home-new" placeholder="Если нет в списке">
-            </label>
-            <label>Команда 2
-              <select id="manual-event-away"></select>
-            </label>
-            <label>Новая команда 2
-              <input id="manual-event-away-new" placeholder="Если нет в списке">
-            </label>
-            <label>Дата и время
-              <input id="manual-event-time" type="datetime-local">
-            </label>
-            <div class="form-grid odds-grid">
-              <label>П1 <input id="manual-odd-home" type="number" min="1.01" step="0.01" value="1.80"></label>
-              <label>X <input id="manual-odd-draw" type="number" min="1.01" step="0.01" value="3.20"></label>
-              <label>П2 <input id="manual-odd-away" type="number" min="1.01" step="0.01" value="2.10"></label>
+          <h2>Последние расчёты</h2>
+          <div id="settlement-runs" class="stack"></div>
+        </article>
+      </section>
+
+      <section class="admin-page" id="admin-page-constructor">
+        <button class="back-button" data-admin-back>Назад</button>
+        <article class="panel">
+          <h2>Конструктор событий</h2>
+          <form class="wizard-form" id="manual-event-form">
+            <div class="wizard-progress">
+              <span data-wizard-dot="1">1</span>
+              <span data-wizard-dot="2">2</span>
+              <span data-wizard-dot="3">3</span>
             </div>
-            <button class="primary" type="submit">Создать матч</button>
+            <section class="wizard-step active" data-wizard-step="1">
+              <h3>Вид спорта и турнир</h3>
+              <label>Вид спорта
+                <select id="manual-event-type">
+                  <option value="soccer">Футбол</option>
+                  <option value="hockey">Хоккей</option>
+                  <option value="esports">Киберспорт</option>
+                </select>
+              </label>
+              <label>Соревнование
+                <select id="manual-event-sport"></select>
+              </label>
+              <label>Новое соревнование
+                <input id="manual-event-sport-new" placeholder="Например, Кубок теста">
+              </label>
+            </section>
+            <section class="wizard-step" data-wizard-step="2">
+              <h3>Участники и время</h3>
+              <label>Команда 1
+                <select id="manual-event-home"></select>
+              </label>
+              <label>Новая команда 1
+                <input id="manual-event-home-new" placeholder="Если нет в списке">
+              </label>
+              <label>Команда 2
+                <select id="manual-event-away"></select>
+              </label>
+              <label>Новая команда 2
+                <input id="manual-event-away-new" placeholder="Если нет в списке">
+              </label>
+              <label>Дата и время
+                <input id="manual-event-time" type="datetime-local">
+              </label>
+              <label>Статус
+                <select id="manual-event-status">
+                  <option value="upcoming">Ожидает</option>
+                  <option value="cancelled">Отменено</option>
+                </select>
+              </label>
+            </section>
+            <section class="wizard-step" data-wizard-step="3">
+              <h3>Рынки</h3>
+              <div class="form-grid odds-grid">
+                <label>П1 <input id="manual-odd-home" type="number" min="1.01" step="0.01" value="1.80"></label>
+                <label>X <input id="manual-odd-draw" type="number" min="1.01" step="0.01" value="3.20"></label>
+                <label>П2 <input id="manual-odd-away" type="number" min="1.01" step="0.01" value="2.10"></label>
+              </div>
+              <details class="market-builder">
+                <summary>Тотал</summary>
+                <label class="checkbox-row"><input id="manual-total-enabled" type="checkbox"> Добавить рынок тотала</label>
+                <div class="form-grid odds-grid">
+                  <label>Линия <input id="manual-total-line" type="number" step="0.5" value="2.5"></label>
+                  <label>Больше <input id="manual-total-over" type="number" min="1.01" step="0.01" value="1.90"></label>
+                  <label>Меньше <input id="manual-total-under" type="number" min="1.01" step="0.01" value="1.90"></label>
+                </div>
+              </details>
+              <details class="market-builder">
+                <summary>Фора</summary>
+                <label class="checkbox-row"><input id="manual-handicap-enabled" type="checkbox"> Добавить рынок форы</label>
+                <div class="form-grid odds-grid">
+                  <label>Фора команды 1 <input id="manual-handicap-line" type="number" step="0.5" value="-1.5"></label>
+                  <label>К1 <input id="manual-handicap-home" type="number" min="1.01" step="0.01" value="1.90"></label>
+                  <label>К2 <input id="manual-handicap-away" type="number" min="1.01" step="0.01" value="1.90"></label>
+                </div>
+              </details>
+              <details class="market-builder">
+                <summary>Видеопросмотр</summary>
+                <label class="checkbox-row"><input id="manual-video-enabled" type="checkbox"> Будет видеопросмотр</label>
+                <div class="form-grid odds-grid">
+                  <label>Да <input id="manual-video-yes" type="number" min="1.01" step="0.01" value="2.40"></label>
+                  <label>Нет <input id="manual-video-no" type="number" min="1.01" step="0.01" value="1.50"></label>
+                </div>
+              </details>
+              <details class="market-builder">
+                <summary>Игрок</summary>
+                <label>Игрок <input id="manual-player-name" placeholder="Фамилия или ник"></label>
+                <label class="checkbox-row"><input id="manual-player-goal-enabled" type="checkbox"> Гол игрока</label>
+                <div class="form-grid odds-grid">
+                  <label>Да <input id="manual-player-goal-yes" type="number" min="1.01" step="0.01" value="2.20"></label>
+                  <label>Нет <input id="manual-player-goal-no" type="number" min="1.01" step="0.01" value="1.60"></label>
+                </div>
+                <label class="checkbox-row"><input id="manual-player-assist-enabled" type="checkbox"> Передача игрока</label>
+                <div class="form-grid odds-grid">
+                  <label>Да <input id="manual-player-assist-yes" type="number" min="1.01" step="0.01" value="2.80"></label>
+                  <label>Нет <input id="manual-player-assist-no" type="number" min="1.01" step="0.01" value="1.35"></label>
+                </div>
+              </details>
+            </section>
+            <div class="wizard-actions">
+              <button class="back-button" id="manual-wizard-prev" type="button">Назад</button>
+              <button class="primary" id="manual-wizard-next" type="button">Далее</button>
+              <button class="primary" id="manual-wizard-submit" type="submit" hidden>Создать событие</button>
+              <button class="back-button" id="manual-wizard-cancel" type="button" hidden>Отменить редактирование</button>
+            </div>
           </form>
         </article>
         <article class="panel">
-          <h2>Матчи для ручного расчёта</h2>
+          <h2>Созданные события</h2>
           <div id="manual-events-list" class="stack"></div>
-        </article>
-        <article class="panel">
-          <h2>Последние расчёты</h2>
-          <div id="settlement-runs" class="stack"></div>
         </article>
       </section>
     </aside>

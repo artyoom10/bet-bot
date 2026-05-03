@@ -13,16 +13,20 @@ const state = {
   aliases: null,
   teamAliasRows: [],
   manualData: { sports: [], teams: [], events: [] },
+  manualStep: 1,
+  editingManualEventId: null,
   selectedEventId: null,
   selections: [],
   ticketExpanded: false,
   stake: 100,
+  activeTab: 'events',
 };
 
 const labels = { home_win: 'П1', draw: 'X', away_win: 'П2' };
 const statusLabels = { pending: 'ожидает', won: 'выиграла', lost: 'проиграла', refund: 'возврат', cancelled: 'отменена' };
 const eventStatusLabels = { upcoming: 'ожидает', finished: 'завершён', cancelled: 'отменён' };
 const clientStatusLabels = { new: 'новый', active: 'активный', vip: 'VIP', test: 'тестовый', restricted: 'ограничен', suspended: 'приостановлен' };
+const marketTitles = { h2h: 'Исход матча', totals: 'Тотал', spreads: 'Фора', video_review: 'Видеопросмотр', player_goal: 'Гол игрока', player_assist: 'Передача игрока' };
 const defaultSportKeys = ['soccer_russia_premier_league', 'soccer_spain_la_liga', 'soccer_uefa_champs_league'];
 const minStake = 30;
 const stakePresets = [30, 50, 100, 200, 500];
@@ -32,6 +36,7 @@ const adminTitles = {
   'api-usage': 'Статистика API',
   users: 'Пользователи',
   aliases: 'Алиасы и команды',
+  constructor: 'Конструктор событий',
   results: 'Расчёт ставок',
 };
 
@@ -95,7 +100,7 @@ function finishWelcome(name) {
     document.querySelector('#welcome-screen').classList.add('hidden');
     window.setTimeout(() => {
       document.querySelector('#welcome-screen').hidden = true;
-    }, 260);
+    }, 360);
   }, 650);
 }
 
@@ -151,6 +156,7 @@ async function loadMe() {
   const profileName = resolveProfileName(data);
   document.querySelector('#profile-name').textContent = profileName;
   document.querySelector('#balance-value').textContent = money(data.wallet.balance);
+  renderProfileView();
   document.querySelectorAll('.admin-only').forEach((item) => {
     item.hidden = !data.user.is_admin;
   });
@@ -272,28 +278,33 @@ function openEventCard(eventId) {
   if (!event) return;
   state.selectedEventId = eventId;
   document.querySelector('#event-card').innerHTML = `
-    <button class="modal-close" type="button" id="close-event-card">Закрыть</button>
-    <p class="label">${escapeHtml(event.league_title)}</p>
+    <header class="full-page-head">
+      <button class="modal-close" type="button" id="close-event-card">Назад</button>
+      <div><p class="label">${escapeHtml(event.league_title)}</p><h2>${escapeHtml(event.home_team.name)} — ${escapeHtml(event.away_team.name)}</h2></div>
+    </header>
     <div class="match-hero">
       <div>${teamLogo(event.home_team)}<strong>${escapeHtml(event.home_team.name)}</strong></div>
       <span>${formatDate(event.commence_time)}</span>
       <div>${teamLogo(event.away_team)}<strong>${escapeHtml(event.away_team.name)}</strong></div>
     </div>
-    <section class="market-section">
-      <h3>Исход матча</h3>
-      <div class="market-row">
-        ${event.odds.outcomes.map((outcome) => {
-          const active = state.selections.some((item) => item.event.id === event.id && item.outcome.selection_key === outcome.selection_key);
-          return `
-            <button class="odd-cell ${active ? 'active' : ''}" data-modal-selection data-event="${event.id}" data-bookmaker="${event.odds.bookmaker_key}" data-market="${event.odds.market_key}" data-selection="${outcome.selection_key}">
-              <span>${labels[outcome.selection_key] || outcome.label}</span><strong>${Number(outcome.price).toFixed(2)}</strong>
-            </button>
-          `;
-        }).join('')}
-      </div>
-    </section>
+    ${(event.markets?.length ? event.markets : [event.odds]).map((market) => `
+      <section class="market-section">
+        <h3>${escapeHtml(market.title || marketTitles[market.market_key] || market.market_key)}</h3>
+        <div class="market-row ${market.outcomes.length === 2 ? 'two' : ''}">
+          ${market.outcomes.map((outcome) => {
+            const active = state.selections.some((item) => item.event.id === event.id && item.outcome.selection_key === outcome.selection_key && item.market_key === market.market_key);
+            return `
+              <button class="odd-cell ${active ? 'active' : ''}" data-modal-selection data-event="${event.id}" data-bookmaker="${market.bookmaker_key}" data-market="${market.market_key}" data-selection="${outcome.selection_key}">
+                <span>${escapeHtml(labels[outcome.selection_key] || outcome.label || outcome.name)}</span><strong>${Number(outcome.price).toFixed(2)}</strong>
+              </button>
+            `;
+          }).join('')}
+        </div>
+      </section>
+    `).join('')}
   `;
   document.querySelector('#event-modal').hidden = false;
+  document.body.classList.add('no-scroll');
   document.querySelector('#close-event-card').addEventListener('click', closeEventCard);
   document.querySelectorAll('[data-modal-selection]').forEach((button) => {
     button.addEventListener('click', (eventClick) => {
@@ -306,21 +317,30 @@ function openEventCard(eventId) {
 
 function closeEventCard() {
   document.querySelector('#event-modal').hidden = true;
+  document.body.classList.remove('no-scroll');
   state.selectedEventId = null;
 }
 
 function toggleSelection(button) {
   const event = state.events.find((item) => item.id === button.dataset.event);
-  const outcome = event.odds.outcomes.find((item) => item.selection_key === button.dataset.selection);
-  const same = state.selections.some((item) => item.event.id === event.id && item.outcome.selection_key === outcome.selection_key);
+  const market = findEventMarket(event, button.dataset.market, button.dataset.bookmaker);
+  const outcome = market.outcomes.find((item) => item.selection_key === button.dataset.selection);
+  const same = state.selections.some((item) => item.event.id === event.id && item.market_key === market.market_key && item.outcome.selection_key === outcome.selection_key);
   if (same) {
     state.selections = state.selections.filter((item) => item.event.id !== event.id);
   } else {
     state.selections = state.selections.filter((item) => item.event.id !== event.id);
-    state.selections.push({ event, outcome, bookmaker_key: button.dataset.bookmaker, market_key: button.dataset.market });
+    state.selections.push({ event, outcome, bookmaker_key: market.bookmaker_key, market_key: market.market_key, market_title: market.title || marketTitles[market.market_key] });
   }
   renderEvents();
   renderTicket();
+}
+
+function findEventMarket(event, marketKey, bookmakerKey) {
+  const markets = event.markets?.length ? event.markets : [event.odds];
+  return markets.find((market) => market.market_key === marketKey && market.bookmaker_key === bookmakerKey)
+    || markets.find((market) => market.market_key === marketKey)
+    || event.odds;
 }
 
 function totalOdds() {
@@ -363,7 +383,7 @@ function renderTicket() {
     <article class="ticket-item">
       <div>
         <strong>${escapeHtml(item.event.home_team.name)} — ${escapeHtml(item.event.away_team.name)}</strong>
-        <p>${teamLogo(item.outcome.selection_key === 'away_win' ? item.event.away_team : item.event.home_team)} ${escapeHtml(item.outcome.name)}</p>
+        <p>${teamLogo(item.outcome.selection_key === 'away_win' ? item.event.away_team : item.event.home_team)} ${escapeHtml(item.market_title || marketTitles[item.market_key] || item.market_key)} · ${escapeHtml(item.outcome.name)}</p>
       </div>
       <strong>${Number(item.outcome.price).toFixed(2)}</strong>
       <button type="button" data-remove-selection="${index}">×</button>
@@ -415,6 +435,7 @@ async function submitBet() {
     });
     state.me.wallet = result.wallet;
     document.querySelector('#balance-value').textContent = money(result.wallet.balance);
+    renderProfileView();
     notify('Ставка принята', 'success');
     tg?.HapticFeedback?.notificationOccurred('success');
     clearTicket();
@@ -430,42 +451,81 @@ async function loadBets() {
 }
 
 function renderBets() {
-  const root = document.querySelector('#bets');
-  if (!state.bets.length) {
-    root.innerHTML = '<article class="empty-state">У вас пока нет ставок.</article>';
+  const pending = state.bets.filter((bet) => bet.status === 'pending');
+  const history = state.bets.filter((bet) => bet.status !== 'pending');
+  renderBetCollection('#bets', pending, 'Активных пари пока нет.');
+  renderBetCollection('#history', history, 'История пока пустая.');
+}
+
+function renderBetCollection(selector, bets, emptyText) {
+  const root = document.querySelector(selector);
+  if (!root) return;
+  if (!bets.length) {
+    root.innerHTML = `<article class="empty-state">${emptyText}</article>`;
     return;
   }
-  root.innerHTML = state.bets.map((bet) => `
-    <article class="bet-row">
-      <div>
-        <strong>${bet.bet_type === 'express' ? `Экспресс · ${bet.selections.length} событий` : 'Ординар'} · ${statusLabels[bet.status] || bet.status}</strong>
-        <p>Кэф ${Number(bet.total_odds).toFixed(2)} · Сумма ${money(bet.amount)}${bet.payout !== null ? ` · Выплата ${money(bet.payout)}` : ''}</p>
+  root.innerHTML = bets.map(renderBetCard).join('');
+}
+
+function renderBetCard(bet) {
+  return `
+    <article class="bet-row ${bet.status}">
+      <div class="bet-main">
+        <div class="card-head">
+          <strong>${bet.bet_type === 'express' ? `Экспресс · ${bet.selections.length} событий` : 'Ординар'}</strong>
+          <span>${statusLabels[bet.status] || bet.status}</span>
+        </div>
+        <div class="bet-money">${betMoneyLine(bet)}</div>
+        <p>Кэф ${Number(bet.total_odds).toFixed(2)} · ${formatDate(bet.created_at)}</p>
         <div class="selection-list">${bet.selections.map((selection) => `
-          <span>${escapeHtml(selection.event_name_ru)} · ${escapeHtml(selection.selection_name_ru || selection.selection_name_raw)} · ${Number(selection.price).toFixed(2)} · ${statusLabels[selection.result_status] || selection.result_status}</span>
+          <span>
+            <strong>${escapeHtml(selection.event_name_ru)}</strong>
+            <small>${escapeHtml(marketTitles[selection.market_key] || selection.market_key)} · ${escapeHtml(selection.selection_name_ru || selection.selection_name_raw)} · ${Number(selection.price).toFixed(2)} · ${statusLabels[selection.result_status] || selection.result_status}</small>
+          </span>
         `).join('')}</div>
       </div>
-      <strong>${money(bet.possible_win)}</strong>
     </article>
-  `).join('');
+  `;
+}
+
+function betMoneyLine(bet) {
+  if (bet.status === 'won') {
+    return `<span>${money(bet.amount)}</span><b class="arrow">→</b><strong class="win">${money(bet.payout ?? bet.possible_win)}</strong>`;
+  }
+  if (bet.status === 'lost') {
+    return `<strong class="loss">-${money(bet.amount)}</strong>`;
+  }
+  if (bet.status === 'refund') {
+    return `<strong class="refund">${money(bet.payout ?? bet.amount)}</strong>`;
+  }
+  return `<span>${money(bet.amount)}</span><b class="arrow">→</b><strong>${money(bet.possible_win)}</strong>`;
 }
 
 function openProfileCard() {
+  switchTab('profile');
+}
+
+function renderProfileView() {
   const user = state.me?.user;
   const wallet = state.me?.wallet;
   if (!user || !wallet) return;
-  document.querySelector('#profile-card-name').textContent = resolveProfileName(state.me);
-  document.querySelector('#profile-card-balance').textContent = money(wallet.balance);
-  document.querySelector('#profile-card-info').innerHTML = `
+  const content = `
     <div class="stat"><span>Telegram ID</span><strong>${escapeHtml(user.tg_id)}</strong></div>
     <div class="stat"><span>Username</span><strong>${escapeHtml(user.username || 'не указан')}</strong></div>
     <div class="stat"><span>Статус</span><strong>${escapeHtml(clientStatusLabels[user.client_status] || user.client_status || 'не указан')}</strong></div>
     <div class="stat"><span>Баланс</span><strong>${money(wallet.balance)}</strong></div>
   `;
-  document.querySelector('#profile-modal').hidden = false;
+  document.querySelector('#profile-view-name').textContent = resolveProfileName(state.me);
+  document.querySelector('#profile-view-balance').textContent = money(wallet.balance);
+  document.querySelector('#profile-view-info').innerHTML = content;
+  document.querySelector('#profile-card-name').textContent = resolveProfileName(state.me);
+  document.querySelector('#profile-card-balance').textContent = money(wallet.balance);
+  document.querySelector('#profile-card-info').innerHTML = content;
 }
 
 function closeProfileCard() {
   document.querySelector('#profile-modal').hidden = true;
+  document.body.classList.remove('no-scroll');
 }
 
 async function loadAdmin() {
@@ -814,14 +874,18 @@ function renderManualConstructor() {
   const awaySelect = document.querySelector('#manual-event-away');
   if (!sportSelect || !homeSelect || !awaySelect) return;
 
-  sportSelect.innerHTML = `<option value="">Выберите соревнование</option>${state.manualData.sports.map((sport) => `
+  const sportType = document.querySelector('#manual-event-type').value || 'soccer';
+  const sports = state.manualData.sports.filter((sport) => manualSportMatches(sport, sportType));
+  const teams = state.manualData.teams.filter((team) => (team.sport_type || 'soccer') === sportType);
+  sportSelect.innerHTML = `<option value="">Выберите соревнование</option>${sports.map((sport) => `
     <option value="${escapeAttr(sport.sport_key)}">${escapeHtml(sport.title_ru || sport.title_en || sport.sport_key)}</option>
   `).join('')}`;
-  const teamOptions = `<option value="">Выберите команду</option>${state.manualData.teams.map((team) => `
+  const teamOptions = `<option value="">Выберите команду</option>${teams.map((team) => `
     <option value="${escapeAttr(team.id)}">${escapeHtml(team.name_ru || team.name_en)}</option>
   `).join('')}`;
   homeSelect.innerHTML = teamOptions;
   awaySelect.innerHTML = teamOptions;
+  setManualWizardStep(state.manualStep || 1);
 
   const list = document.querySelector('#manual-events-list');
   list.innerHTML = state.manualData.events.length ? state.manualData.events.map((event) => `
@@ -831,47 +895,190 @@ function renderManualConstructor() {
         <span>${escapeHtml(eventStatusLabels[event.status] || event.status)}</span>
       </div>
       <p class="muted">${escapeHtml(sportTitle(event.sport_key))} · ${formatDate(event.commence_time)}</p>
-      <div class="form-grid manual-result-row">
-        <input data-manual-home-score="${event.id}" type="number" min="0" placeholder="Счёт 1">
-        <input data-manual-away-score="${event.id}" type="number" min="0" placeholder="Счёт 2">
-        <button class="primary" data-manual-event-settle="${event.id}" type="button">Рассчитать</button>
+      <p class="muted">Рынков: ${new Set((event.odds || []).map((odd) => odd.market_key)).size || 0} · Исходов: ${(event.odds || []).length}</p>
+      <div class="admin-actions">
+        <button class="primary" data-manual-edit="${event.id}" type="button">Изменить</button>
+        <button class="back-button danger-button" data-manual-delete="${event.id}" type="button">Удалить</button>
       </div>
     </article>
   `).join('') : '<p class="muted">Ручных матчей пока нет.</p>';
-  document.querySelectorAll('[data-manual-event-settle]').forEach((button) => {
-    button.addEventListener('click', () => settleManualListEvent(button.dataset.manualEventSettle));
-  });
+  document.querySelectorAll('[data-manual-edit]').forEach((button) => button.addEventListener('click', () => editManualEvent(button.dataset.manualEdit)));
+  document.querySelectorAll('[data-manual-delete]').forEach((button) => button.addEventListener('click', () => deleteManualEvent(button.dataset.manualDelete)));
 }
 
 async function createManualEvent(event) {
   event.preventDefault();
-  showLoading('Создание матча', 'Сохраняю матч и коэффициенты...');
+  const isEditing = Boolean(state.editingManualEventId);
+  showLoading(isEditing ? 'Событие' : 'Создание события', 'Сохраняю событие и рынки...');
   try {
-    const result = await apiFetch('/api/admin/manual-events', {
-      method: 'POST',
-      body: JSON.stringify({
-        sport_type: document.querySelector('#manual-event-type').value,
-        sport_key: document.querySelector('#manual-event-sport').value,
-        sport_title: document.querySelector('#manual-event-sport-new').value,
-        home_team_id: document.querySelector('#manual-event-home').value,
-        home_team_name: document.querySelector('#manual-event-home-new').value,
-        away_team_id: document.querySelector('#manual-event-away').value,
-        away_team_name: document.querySelector('#manual-event-away-new').value,
-        commence_time: document.querySelector('#manual-event-time').value,
-        home_price: document.querySelector('#manual-odd-home').value,
-        draw_price: document.querySelector('#manual-odd-draw').value,
-        away_price: document.querySelector('#manual-odd-away').value,
-      }),
+    const path = state.editingManualEventId ? `/api/admin/manual-events/${state.editingManualEventId}` : '/api/admin/manual-events';
+    const result = await apiFetch(path, {
+      method: state.editingManualEventId ? 'PATCH' : 'POST',
+      body: JSON.stringify(manualFormPayload()),
     });
+    state.manualData = result;
+    resetManualWizard();
+    renderManualConstructor();
+    await loadSports().catch(() => {});
+    await loadEvents().catch(() => {});
+    notify(isEditing ? 'Событие обновлено' : 'Событие создано', 'success');
+  } finally {
+    hideLoading();
+  }
+}
+
+function setManualWizardStep(step) {
+  state.manualStep = Math.min(3, Math.max(1, Number(step) || 1));
+  document.querySelectorAll('[data-wizard-step]').forEach((item) => item.classList.toggle('active', Number(item.dataset.wizardStep) === state.manualStep));
+  document.querySelectorAll('[data-wizard-dot]').forEach((item) => item.classList.toggle('active', Number(item.dataset.wizardDot) <= state.manualStep));
+  document.querySelector('#manual-wizard-prev').disabled = state.manualStep === 1;
+  document.querySelector('#manual-wizard-next').hidden = state.manualStep === 3;
+  document.querySelector('#manual-wizard-submit').hidden = state.manualStep !== 3;
+  document.querySelector('#manual-wizard-submit').textContent = state.editingManualEventId ? 'Сохранить событие' : 'Создать событие';
+  document.querySelector('#manual-wizard-cancel').hidden = !state.editingManualEventId;
+}
+
+function manualFormPayload() {
+  return {
+    sport_type: document.querySelector('#manual-event-type').value,
+    sport_key: document.querySelector('#manual-event-sport').value,
+    sport_title: document.querySelector('#manual-event-sport-new').value,
+    home_team_id: document.querySelector('#manual-event-home').value,
+    home_team_name: document.querySelector('#manual-event-home-new').value,
+    away_team_id: document.querySelector('#manual-event-away').value,
+    away_team_name: document.querySelector('#manual-event-away-new').value,
+    commence_time: document.querySelector('#manual-event-time').value,
+    status: document.querySelector('#manual-event-status').value,
+    home_price: document.querySelector('#manual-odd-home').value,
+    draw_price: document.querySelector('#manual-odd-draw').value,
+    away_price: document.querySelector('#manual-odd-away').value,
+    totals_enabled: document.querySelector('#manual-total-enabled').checked,
+    total_line: document.querySelector('#manual-total-line').value,
+    total_over_price: document.querySelector('#manual-total-over').value,
+    total_under_price: document.querySelector('#manual-total-under').value,
+    handicap_enabled: document.querySelector('#manual-handicap-enabled').checked,
+    handicap_line: document.querySelector('#manual-handicap-line').value,
+    handicap_home_price: document.querySelector('#manual-handicap-home').value,
+    handicap_away_price: document.querySelector('#manual-handicap-away').value,
+    video_enabled: document.querySelector('#manual-video-enabled').checked,
+    video_yes_price: document.querySelector('#manual-video-yes').value,
+    video_no_price: document.querySelector('#manual-video-no').value,
+    player_name: document.querySelector('#manual-player-name').value,
+    player_goal_enabled: document.querySelector('#manual-player-goal-enabled').checked,
+    player_goal_yes_price: document.querySelector('#manual-player-goal-yes').value,
+    player_goal_no_price: document.querySelector('#manual-player-goal-no').value,
+    player_assist_enabled: document.querySelector('#manual-player-assist-enabled').checked,
+    player_assist_yes_price: document.querySelector('#manual-player-assist-yes').value,
+    player_assist_no_price: document.querySelector('#manual-player-assist-no').value,
+  };
+}
+
+function editManualEvent(eventId) {
+  const event = state.manualData.events.find((item) => item.id === eventId);
+  if (!event) return;
+  const config = event.raw_payload?.market_config || {};
+  state.editingManualEventId = eventId;
+  document.querySelector('#manual-event-type').value = config.sport_type || sportTypeFromKey(event.sport_key);
+  renderManualConstructor();
+  document.querySelector('#manual-event-sport').value = event.sport_key;
+  document.querySelector('#manual-event-sport-new').value = '';
+  document.querySelector('#manual-event-home').value = event.home_team_id || '';
+  document.querySelector('#manual-event-home-new').value = event.home_team_id ? '' : event.home_team_raw;
+  document.querySelector('#manual-event-away').value = event.away_team_id || '';
+  document.querySelector('#manual-event-away-new').value = event.away_team_id ? '' : event.away_team_raw;
+  document.querySelector('#manual-event-time').value = toDatetimeLocal(event.commence_time);
+  document.querySelector('#manual-event-status').value = event.status || 'upcoming';
+  populateManualOdds(event);
+  setManualWizardStep(1);
+  document.querySelector('#manual-event-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function populateManualOdds(event) {
+  const odds = event.odds || [];
+  const byKey = Object.fromEntries(odds.map((odd) => [odd.selection_key, odd]));
+  document.querySelector('#manual-odd-home').value = byKey.home_win?.price || '1.80';
+  document.querySelector('#manual-odd-draw').value = byKey.draw?.price || '3.20';
+  document.querySelector('#manual-odd-away').value = byKey.away_win?.price || '2.10';
+
+  const totalOver = odds.find((odd) => odd.selection_key.startsWith('total_over'));
+  const totalUnder = odds.find((odd) => odd.selection_key.startsWith('total_under'));
+  document.querySelector('#manual-total-enabled').checked = Boolean(totalOver && totalUnder);
+  document.querySelector('#manual-total-line').value = totalOver ? lineFromSelection(totalOver.selection_key) : '2.5';
+  document.querySelector('#manual-total-over').value = totalOver?.price || '1.90';
+  document.querySelector('#manual-total-under').value = totalUnder?.price || '1.90';
+
+  const handicapHome = odds.find((odd) => odd.selection_key.startsWith('handicap_home'));
+  const handicapAway = odds.find((odd) => odd.selection_key.startsWith('handicap_away'));
+  document.querySelector('#manual-handicap-enabled').checked = Boolean(handicapHome && handicapAway);
+  document.querySelector('#manual-handicap-line').value = handicapHome ? lineFromSelection(handicapHome.selection_key) : '-1.5';
+  document.querySelector('#manual-handicap-home').value = handicapHome?.price || '1.90';
+  document.querySelector('#manual-handicap-away').value = handicapAway?.price || '1.90';
+
+  document.querySelector('#manual-video-enabled').checked = Boolean(byKey.video_review_yes && byKey.video_review_no);
+  document.querySelector('#manual-video-yes').value = byKey.video_review_yes?.price || '2.40';
+  document.querySelector('#manual-video-no').value = byKey.video_review_no?.price || '1.50';
+
+  const playerName = event.raw_payload?.market_config?.player_name || '';
+  document.querySelector('#manual-player-name').value = playerName;
+  document.querySelector('#manual-player-goal-enabled').checked = Boolean(byKey.player_goal_yes && byKey.player_goal_no);
+  document.querySelector('#manual-player-goal-yes').value = byKey.player_goal_yes?.price || '2.20';
+  document.querySelector('#manual-player-goal-no').value = byKey.player_goal_no?.price || '1.60';
+  document.querySelector('#manual-player-assist-enabled').checked = Boolean(byKey.player_assist_yes && byKey.player_assist_no);
+  document.querySelector('#manual-player-assist-yes').value = byKey.player_assist_yes?.price || '2.80';
+  document.querySelector('#manual-player-assist-no').value = byKey.player_assist_no?.price || '1.35';
+}
+
+async function deleteManualEvent(eventId) {
+  if (!window.confirm('Удалить событие? Если по нему есть ставки, оно будет отменено.')) return;
+  showLoading('Событие', 'Удаляю событие...');
+  try {
+    const result = await apiFetch(`/api/admin/manual-events/${eventId}`, { method: 'DELETE' });
     state.manualData = result;
     renderManualConstructor();
     await loadSports().catch(() => {});
     await loadEvents().catch(() => {});
-    event.currentTarget.reset();
-    notify('Матч создан', 'success');
+    notify(result.cancelled ? 'Событие отменено, потому что по нему есть ставки' : 'Событие удалено', 'success');
   } finally {
     hideLoading();
   }
+}
+
+function resetManualWizard() {
+  document.querySelector('#manual-event-form').reset();
+  state.editingManualEventId = null;
+  state.manualStep = 1;
+  renderManualConstructor();
+}
+
+function manualSportMatches(sport, sportType) {
+  if (sportType === 'soccer') {
+    return sport.sport_key?.startsWith('soccer_')
+      || sport.sport_key?.startsWith('manual_soccer_')
+      || sport.group_name === 'soccer'
+      || sport.group_name === 'Manual'
+      || (sport.source === 'manual' && !sport.sport_key?.includes('hockey') && !sport.sport_key?.includes('esports'));
+  }
+  return sport.sport_key?.startsWith(`manual_${sportType}_`) || sport.group_name === sportType;
+}
+
+function sportTypeFromKey(sportKey) {
+  if (sportKey?.includes('hockey')) return 'hockey';
+  if (sportKey?.includes('esports')) return 'esports';
+  return 'soccer';
+}
+
+function toDatetimeLocal(value) {
+  const date = new Date(value);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function lineFromSelection(selectionKey) {
+  const parts = selectionKey.split('_');
+  const marker = parts[parts.length - 1] || '';
+  const sign = marker.startsWith('m') ? -1 : 1;
+  const raw = marker.replace(/^[mp]/, '').replaceAll('p', '.');
+  return sign * Number(raw || 0);
 }
 
 async function settleManualListEvent(eventId) {
@@ -954,6 +1161,8 @@ function navigateAdmin(route = 'menu') {
   if (route === 'results') {
     loadSettlementRuns().catch((error) => status(error.message));
     loadAdminEvents().catch((error) => status(error.message));
+  }
+  if (route === 'constructor') {
     loadManualConstructor().catch((error) => status(error.message));
   }
 }
@@ -969,10 +1178,12 @@ function handleHash() {
 }
 
 function switchTab(tab) {
+  state.activeTab = tab;
   document.querySelectorAll('.tab').forEach((button) => button.classList.toggle('active', button.dataset.tab === tab));
   document.querySelectorAll('.view').forEach((view) => view.classList.remove('active'));
   document.querySelector(`#view-${tab}`).classList.add('active');
-  if (tab === 'bets') loadBets().catch((error) => status(error.message));
+  if (tab === 'bets' || tab === 'history') loadBets().catch((error) => status(error.message));
+  if (tab === 'profile') renderProfileView();
 }
 
 function openCreateUserModal() {
@@ -1109,6 +1320,10 @@ document.querySelector('#manual-event-form').addEventListener('submit', (event) 
   notify(error.message, 'error');
   hideLoading();
 }));
+document.querySelector('#manual-wizard-next').addEventListener('click', () => setManualWizardStep(state.manualStep + 1));
+document.querySelector('#manual-wizard-prev').addEventListener('click', () => setManualWizardStep(state.manualStep - 1));
+document.querySelector('#manual-wizard-cancel').addEventListener('click', resetManualWizard);
+document.querySelector('#manual-event-type').addEventListener('change', () => renderManualConstructor());
 document.querySelector('#open-create-user').addEventListener('click', openCreateUserModal);
 document.querySelector('#close-create-user').addEventListener('click', closeCreateUserModal);
 document.querySelector('#create-user-form').addEventListener('submit', (event) => createUser(event).catch((error) => status(error.message)));

@@ -169,7 +169,7 @@ def manual_result_and_settle(
             {"id": f"eq.{event_id}"},
         )
     )
-    settle_event_selections(db, event_id, winner)
+    settle_event_selections(db, event_id, winner, home_score, away_score)
     settled = settle_pending_bets(db, [event_id])
     return {"event": updated, "bets_settled": settled}
 
@@ -208,19 +208,72 @@ def update_event_result_from_score(db: SupabaseRestClient, sport_key: str, score
             {"id": f"eq.{event['id']}"},
         )
     )
-    settle_event_selections(db, event["id"], winner)
+    settle_event_selections(db, event["id"], winner, home_score, away_score)
     return updated
 
 
-def settle_event_selections(db: SupabaseRestClient, event_id: str, winner: str) -> None:
-    if winner in {"home_win", "draw", "away_win"}:
-        selections = db.select("bet_selections", {"select": "*", "event_id": f"eq.{event_id}", "result_status": "eq.pending"})
-        for selection in selections:
-            status = "won" if selection["selection_key"] == winner else "lost"
-            db.update("bet_selections", {"result_status": status}, {"id": f"eq.{selection['id']}"})
-        return
+def settle_event_selections(
+    db: SupabaseRestClient,
+    event_id: str,
+    winner: str,
+    home_score: int | None = None,
+    away_score: int | None = None,
+) -> None:
+    selections = db.select("bet_selections", {"select": "*", "event_id": f"eq.{event_id}", "result_status": "eq.pending"})
+    for selection in selections:
+        status = selection_result_status(selection, winner, home_score, away_score)
+        db.update("bet_selections", {"result_status": status}, {"id": f"eq.{selection['id']}"})
 
-    db.update("bet_selections", {"result_status": "refund"}, {"event_id": f"eq.{event_id}", "result_status": "eq.pending"})
+
+def selection_result_status(selection: dict[str, Any], winner: str, home_score: int | None, away_score: int | None) -> str:
+    if winner not in {"home_win", "draw", "away_win"} or home_score is None or away_score is None:
+        return "refund"
+
+    market_key = selection.get("market_key") or "h2h"
+    selection_key = selection["selection_key"]
+
+    if market_key == "h2h":
+        return "won" if selection_key == winner else "lost"
+
+    if market_key == "totals":
+        line = selection_line(selection_key)
+        if line is None:
+            return "refund"
+        total = home_score + away_score
+        if total == line:
+            return "refund"
+        if selection_key.startswith("total_over"):
+            return "won" if total > line else "lost"
+        if selection_key.startswith("total_under"):
+            return "won" if total < line else "lost"
+
+    if market_key == "spreads":
+        line = selection_line(selection_key)
+        if line is None:
+            return "refund"
+        if selection_key.startswith("handicap_home"):
+            score = home_score + line - away_score
+        elif selection_key.startswith("handicap_away"):
+            score = away_score + line - home_score
+        else:
+            return "refund"
+        if score == 0:
+            return "refund"
+        return "won" if score > 0 else "lost"
+
+    return "refund"
+
+
+def selection_line(selection_key: str) -> float | None:
+    marker = selection_key.rsplit("_", 1)[-1]
+    if not marker:
+        return None
+    sign = -1 if marker.startswith("m") else 1
+    raw = marker[1:] if marker[:1] in {"m", "p"} else marker
+    try:
+        return sign * float(raw.replace("p", "."))
+    except ValueError:
+        return None
 
 
 def settle_pending_bets(db: SupabaseRestClient, event_ids: list[str] | None = None) -> int:

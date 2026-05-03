@@ -281,6 +281,23 @@ def api_admin_create_manual_event():
     return jsonify({"ok": True, **result, **manual_events_payload(db)})
 
 
+@app.patch("/api/admin/manual-events/<event_id>")
+def api_admin_update_manual_event(event_id: str):
+    db = get_db()
+    admin_user = require_admin(request, db)
+    payload = request.get_json(silent=True) or {}
+    result = update_manual_event(db, admin_user, event_id, payload)
+    return jsonify({"ok": True, **result, **manual_events_payload(db)})
+
+
+@app.delete("/api/admin/manual-events/<event_id>")
+def api_admin_delete_manual_event(event_id: str):
+    db = get_db()
+    admin_user = require_admin(request, db)
+    result = delete_manual_event(db, admin_user, event_id)
+    return jsonify({"ok": True, **result, **manual_events_payload(db)})
+
+
 @app.post("/api/admin/users")
 def api_admin_create_user():
     db = get_db()
@@ -613,6 +630,23 @@ def manual_events_payload(db) -> dict[str, Any]:
             "limit": "100",
         },
     )
+    if events:
+        event_ids = [event["id"] for event in events]
+        odds = db.select(
+            "odds_current",
+            {
+                "select": "*",
+                "event_id": f"in.({','.join(event_ids)})",
+                "bookmaker_key": "eq.manual",
+                "order": "market_key.asc,selection_key.asc",
+            },
+        )
+        odds_by_event: dict[str, list[dict[str, Any]]] = {}
+        for odd in odds:
+            odd["price"] = float(odd["price"])
+            odds_by_event.setdefault(odd["event_id"], []).append(odd)
+        for event in events:
+            event["odds"] = odds_by_event.get(event["id"], [])
     return {"sports": sports, "teams": teams, "events": events}
 
 
@@ -639,7 +673,7 @@ def create_manual_event(db, admin_user: dict[str, Any], payload: dict[str, Any])
                 "away_team_raw": away_team["name_en"],
                 "commence_time": commence_time,
                 "status": "upcoming",
-                "raw_payload": {"created_by": "admin_constructor", "admin_tg_id": admin_user.get("tg_id")},
+                "raw_payload": manual_raw_payload(payload, admin_user),
                 "last_odds_sync_at": now,
                 "updated_at": now,
             },
@@ -649,35 +683,242 @@ def create_manual_event(db, admin_user: dict[str, Any], payload: dict[str, Any])
         raise AppError("manual_event_create_failed", "Не удалось создать матч", 500)
 
     db.upsert("bookmakers", {"bookmaker_key": "manual", "title": "Manual", "updated_at": now}, "bookmaker_key")
-    odds = {
-        "home_win": parse_price(payload.get("home_price", 1.8), "П1"),
-        "draw": parse_price(payload.get("draw_price", 3.2), "X"),
-        "away_win": parse_price(payload.get("away_price", 2.1), "П2"),
-    }
-    rows = []
-    for key, price in odds.items():
-        rows.append(
-            {
-                "event_id": event["id"],
-                "bookmaker_key": "manual",
-                "market_key": "h2h",
-                "selection_key": key,
-                "selection_name_raw": selection_name(key, home_team, away_team),
-                "selection_name_ru": selection_name(key, home_team, away_team),
-                "price": price,
-                "api_last_update": now,
-                "updated_at": now,
-            }
-        )
-    db.upsert("odds_current", rows, "event_id,bookmaker_key,market_key,selection_key")
+    save_manual_odds(db, event["id"], home_team, away_team, payload, now)
     return {"event": event}
+
+
+def update_manual_event(db, admin_user: dict[str, Any], event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    existing = first(db.select("events", {"select": "*", "id": f"eq.{event_id}", "source": "eq.manual", "limit": "1"}))
+    if not existing:
+        raise AppError("manual_event_not_found", "Ручное событие не найдено", 404)
+
+    sport = ensure_manual_sport(db, payload)
+    sport_type = manual_sport_type(payload)
+    home_team = ensure_manual_team(db, payload.get("home_team_id"), payload.get("home_team_name"), sport_type)
+    away_team = ensure_manual_team(db, payload.get("away_team_id"), payload.get("away_team_name"), sport_type)
+    if home_team["id"] == away_team["id"]:
+        raise AppError("same_team", "Выберите разные команды", 400)
+
+    now = datetime.now(timezone.utc).isoformat()
+    event = first(
+        db.update(
+            "events",
+            {
+                "sport_key": sport["sport_key"],
+                "home_team_id": home_team["id"],
+                "away_team_id": away_team["id"],
+                "home_team_raw": home_team["name_en"],
+                "away_team_raw": away_team["name_en"],
+                "commence_time": parse_manual_datetime(payload.get("commence_time")),
+                "status": clean_event_status(payload.get("status") or existing.get("status")),
+                "raw_payload": manual_raw_payload(payload, admin_user, existing.get("raw_payload")),
+                "last_odds_sync_at": now,
+                "updated_at": now,
+            },
+            {"id": f"eq.{event_id}"},
+        )
+    )
+    db.delete("odds_current", {"event_id": f"eq.{event_id}", "bookmaker_key": "eq.manual"})
+    save_manual_odds(db, event_id, home_team, away_team, payload, now)
+    return {"event": event}
+
+
+def delete_manual_event(db, admin_user: dict[str, Any], event_id: str) -> dict[str, Any]:
+    existing = first(db.select("events", {"select": "*", "id": f"eq.{event_id}", "source": "eq.manual", "limit": "1"}))
+    if not existing:
+        raise AppError("manual_event_not_found", "Ручное событие не найдено", 404)
+
+    linked = db.select("bet_selections", {"select": "id", "event_id": f"eq.{event_id}", "limit": "1"})
+    if linked:
+        now = datetime.now(timezone.utc).isoformat()
+        event = first(
+            db.update(
+                "events",
+                {
+                    "status": "cancelled",
+                    "result_winner": "cancelled",
+                    "settled_at": now,
+                    "updated_at": now,
+                    "raw_payload": {**(existing.get("raw_payload") or {}), "deleted_by_admin_tg_id": admin_user.get("tg_id")},
+                },
+                {"id": f"eq.{event_id}"},
+            )
+        )
+        db.update("bet_selections", {"result_status": "refund"}, {"event_id": f"eq.{event_id}", "result_status": "eq.pending"})
+        settled = settle_pending_bets(db, [event_id])
+        return {"deleted": False, "cancelled": True, "event": event, "bets_settled": settled}
+
+    deleted = db.delete("events", {"id": f"eq.{event_id}", "source": "eq.manual"})
+    return {"deleted": True, "event": first(deleted) or existing}
+
+
+def save_manual_odds(
+    db,
+    event_id: str,
+    home_team: dict[str, Any],
+    away_team: dict[str, Any],
+    payload: dict[str, Any],
+    now: str,
+) -> None:
+    rows = manual_market_rows(event_id, home_team, away_team, payload, now)
+    if not rows:
+        raise AppError("manual_markets_required", "Добавьте хотя бы один рынок", 400)
+    db.upsert("odds_current", rows, "event_id,bookmaker_key,market_key,selection_key")
+
+
+def manual_market_rows(
+    event_id: str,
+    home_team: dict[str, Any],
+    away_team: dict[str, Any],
+    payload: dict[str, Any],
+    now: str,
+) -> list[dict[str, Any]]:
+    rows = [
+        manual_odd_row(event_id, "h2h", "home_win", home_team["name_ru"], parse_price(payload.get("home_price", 1.8), "П1"), now),
+        manual_odd_row(event_id, "h2h", "draw", "Ничья", parse_price(payload.get("draw_price", 3.2), "X"), now),
+        manual_odd_row(event_id, "h2h", "away_win", away_team["name_ru"], parse_price(payload.get("away_price", 2.1), "П2"), now),
+    ]
+
+    if as_bool(payload.get("totals_enabled")):
+        line = parse_line(payload.get("total_line"), "тотала")
+        key = line_key(line)
+        rows.extend(
+            [
+                manual_odd_row(event_id, "totals", f"total_over_{key}", f"Тотал больше {format_line(line)}", parse_price(payload.get("total_over_price"), "ТБ"), now),
+                manual_odd_row(event_id, "totals", f"total_under_{key}", f"Тотал меньше {format_line(line)}", parse_price(payload.get("total_under_price"), "ТМ"), now),
+            ]
+        )
+
+    if as_bool(payload.get("handicap_enabled")):
+        line = parse_line(payload.get("handicap_line"), "форы")
+        rows.extend(
+            [
+                manual_odd_row(
+                    event_id,
+                    "spreads",
+                    f"handicap_home_{line_key(line)}",
+                    f"{home_team['name_ru']} фора {format_signed_line(line)}",
+                    parse_price(payload.get("handicap_home_price"), "Ф1"),
+                    now,
+                ),
+                manual_odd_row(
+                    event_id,
+                    "spreads",
+                    f"handicap_away_{line_key(-line)}",
+                    f"{away_team['name_ru']} фора {format_signed_line(-line)}",
+                    parse_price(payload.get("handicap_away_price"), "Ф2"),
+                    now,
+                ),
+            ]
+        )
+
+    if as_bool(payload.get("video_enabled")):
+        rows.extend(
+            [
+                manual_odd_row(event_id, "video_review", "video_review_yes", "Видеопросмотр - да", parse_price(payload.get("video_yes_price"), "видеопросмотр да"), now),
+                manual_odd_row(event_id, "video_review", "video_review_no", "Видеопросмотр - нет", parse_price(payload.get("video_no_price"), "видеопросмотр нет"), now),
+            ]
+        )
+
+    player_name = str(payload.get("player_name") or "").strip()
+    if as_bool(payload.get("player_goal_enabled")):
+        if not player_name:
+            raise AppError("player_required", "Укажите игрока для рынка гола или передачи", 400)
+        rows.extend(
+            [
+                manual_odd_row(event_id, "player_goal", "player_goal_yes", f"Гол {player_name} - да", parse_price(payload.get("player_goal_yes_price"), "гол да"), now),
+                manual_odd_row(event_id, "player_goal", "player_goal_no", f"Гол {player_name} - нет", parse_price(payload.get("player_goal_no_price"), "гол нет"), now),
+            ]
+        )
+
+    if as_bool(payload.get("player_assist_enabled")):
+        if not player_name:
+            raise AppError("player_required", "Укажите игрока для рынка гола или передачи", 400)
+        rows.extend(
+            [
+                manual_odd_row(event_id, "player_assist", "player_assist_yes", f"Передача {player_name} - да", parse_price(payload.get("player_assist_yes_price"), "передача да"), now),
+                manual_odd_row(event_id, "player_assist", "player_assist_no", f"Передача {player_name} - нет", parse_price(payload.get("player_assist_no_price"), "передача нет"), now),
+            ]
+        )
+
+    return rows
+
+
+def manual_odd_row(event_id: str, market_key: str, selection_key: str, name: str, price: float, now: str) -> dict[str, Any]:
+    return {
+        "event_id": event_id,
+        "bookmaker_key": "manual",
+        "market_key": market_key,
+        "selection_key": selection_key,
+        "selection_name_raw": name,
+        "selection_name_ru": name,
+        "price": price,
+        "api_last_update": now,
+        "updated_at": now,
+    }
+
+
+def manual_raw_payload(payload: dict[str, Any], admin_user: dict[str, Any], previous: dict[str, Any] | None = None) -> dict[str, Any]:
+    market_config = {
+        "sport_type": manual_sport_type(payload),
+        "totals_enabled": as_bool(payload.get("totals_enabled")),
+        "total_line": payload.get("total_line"),
+        "handicap_enabled": as_bool(payload.get("handicap_enabled")),
+        "handicap_line": payload.get("handicap_line"),
+        "video_enabled": as_bool(payload.get("video_enabled")),
+        "player_name": str(payload.get("player_name") or "").strip() or None,
+        "player_goal_enabled": as_bool(payload.get("player_goal_enabled")),
+        "player_assist_enabled": as_bool(payload.get("player_assist_enabled")),
+    }
+    base = previous or {}
+    return {
+        **base,
+        "created_by": base.get("created_by") or "admin_constructor",
+        "admin_tg_id": base.get("admin_tg_id") or admin_user.get("tg_id"),
+        "updated_by_admin_tg_id": admin_user.get("tg_id"),
+        "market_config": market_config,
+    }
+
+
+def clean_event_status(value: Any) -> str:
+    status = str(value or "upcoming").strip()
+    if status not in {"upcoming", "finished", "cancelled"}:
+        raise AppError("invalid_event_status", "Некорректный статус события", 400)
+    return status
+
+
+def as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parse_line(value: Any, label: str) -> float:
+    try:
+        return round(float(value), 2)
+    except (TypeError, ValueError) as exc:
+        raise AppError("invalid_line", f"Некорректная линия {label}", 400) from exc
+
+
+def line_key(value: float) -> str:
+    sign = "m" if value < 0 else "p"
+    return f"{sign}{str(abs(value)).replace('.', 'p')}"
+
+
+def format_line(value: float) -> str:
+    return f"{value:g}"
+
+
+def format_signed_line(value: float) -> str:
+    return f"{value:+g}"
 
 
 def ensure_manual_sport(db, payload: dict[str, Any]) -> dict[str, Any]:
     title = str(payload.get("sport_title") or "").strip()
     sport_key = str(payload.get("sport_key") or "").strip()
+    sport_type = manual_sport_type(payload)
     if title:
-        sport_key = f"manual_{slugify(title)}_{uuid4().hex[:6]}"
+        sport_key = f"manual_{sport_type}_{slugify(title)}_{uuid4().hex[:6]}"
         sport = first(
             db.insert(
                 "sports",
@@ -686,7 +927,7 @@ def ensure_manual_sport(db, payload: dict[str, Any]) -> dict[str, Any]:
                     "sport_key": sport_key,
                     "title_en": title,
                     "title_ru": title,
-                    "group_name": "Manual",
+                    "group_name": sport_type,
                     "is_enabled": True,
                 },
             )
@@ -736,7 +977,9 @@ def ensure_manual_team(db, team_id: str | None, name: str | None, sport_type: st
 
 def manual_sport_type(payload: dict[str, Any]) -> str:
     value = str(payload.get("sport_type") or "soccer").strip().lower()
-    return value if value else "soccer"
+    if value not in {"soccer", "hockey", "esports"}:
+        raise AppError("invalid_sport_type", "Выберите футбол, хоккей или киберспорт", 400)
+    return value
 
 
 def parse_manual_datetime(value: Any) -> str:

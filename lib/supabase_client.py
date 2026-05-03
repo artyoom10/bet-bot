@@ -97,6 +97,14 @@ class SupabaseRestClient:
             headers={"Prefer": "return=representation"},
         )
 
+    def delete(self, table: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self.request(
+            "DELETE",
+            table,
+            params=params,
+            headers={"Prefer": "return=representation"},
+        )
+
 
 def get_db() -> SupabaseRestClient:
     return SupabaseRestClient()

@@ -13,6 +13,15 @@ SELECTION_LABELS = {
     "away_win": "П2",
 }
 
+MARKET_TITLES = {
+    "h2h": "Исход матча",
+    "totals": "Тотал",
+    "spreads": "Фора",
+    "video_review": "Видеопросмотр",
+    "player_goal": "Гол игрока",
+    "player_assist": "Передача игрока",
+}
+
 DEFAULT_SPORT_TITLES = {
     "soccer_russia_premier_league": "Российская Премьер-Лига",
     "soccer_spain_la_liga": "Ла Лига",
@@ -57,15 +66,7 @@ def get_events_for_app(db: SupabaseRestClient, sport_key: str | None = None) -> 
         }
 
     event_ids = [event["id"] for event in events]
-    odds_rows = db.select(
-        "odds_current",
-        {
-            "select": "*",
-            "event_id": f"in.({','.join(event_ids)})",
-            "market_key": "eq.h2h",
-            "order": "bookmaker_key.asc",
-        },
-    )
+    odds_rows = db.select("odds_current", {"select": "*", "event_id": f"in.({','.join(event_ids)})", "order": "bookmaker_key.asc,market_key.asc"})
     odds_by_event: dict[str, list[dict[str, Any]]] = {}
     bookmaker_keys = set()
     for row in odds_rows:
@@ -81,7 +82,8 @@ def get_events_for_app(db: SupabaseRestClient, sport_key: str | None = None) -> 
 
     formatted = []
     for event in events:
-        event_odds = choose_bookmaker_odds(odds_by_event.get(event["id"], []))
+        event_rows = odds_by_event.get(event["id"], [])
+        event_odds = choose_market_odds(event_rows, "h2h") or choose_bookmaker_odds(event_rows)
         if not event_odds:
             continue
 
@@ -89,6 +91,7 @@ def get_events_for_app(db: SupabaseRestClient, sport_key: str | None = None) -> 
         away_team = teams.get(event.get("away_team_id"))
         bookmaker_key = event_odds[0]["bookmaker_key"]
         bookmaker = bookmakers.get(bookmaker_key, {})
+        markets = format_markets(event_rows, bookmakers)
 
         formatted.append(
             {
@@ -101,9 +104,11 @@ def get_events_for_app(db: SupabaseRestClient, sport_key: str | None = None) -> 
                 "odds": {
                     "bookmaker_key": bookmaker_key,
                     "bookmaker_title": bookmaker.get("title") or bookmaker_key,
-                    "market_key": "h2h",
+                    "market_key": event_odds[0]["market_key"],
+                    "title": MARKET_TITLES.get(event_odds[0]["market_key"], event_odds[0]["market_key"]),
                     "outcomes": [format_outcome(row) for row in sort_outcomes(event_odds)],
                 },
+                "markets": markets,
             }
         )
 
@@ -158,9 +163,62 @@ def choose_bookmaker_odds(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [row for row in rows if row["bookmaker_key"] == selected_key]
 
 
+def choose_market_odds(rows: list[dict[str, Any]], market_key: str) -> list[dict[str, Any]]:
+    return choose_bookmaker_odds([row for row in rows if row["market_key"] == market_key])
+
+
+def format_markets(rows: list[dict[str, Any]], bookmakers: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    markets = []
+    market_keys = []
+    for row in rows:
+        if row["market_key"] not in market_keys:
+            market_keys.append(row["market_key"])
+
+    market_order = {"h2h": 0, "totals": 1, "spreads": 2, "video_review": 3, "player_goal": 4, "player_assist": 5}
+    for market_key in sorted(market_keys, key=lambda key: market_order.get(key, 99)):
+        market_rows = choose_market_odds(rows, market_key)
+        if not market_rows:
+            continue
+        bookmaker_key = market_rows[0]["bookmaker_key"]
+        bookmaker = bookmakers.get(bookmaker_key, {})
+        markets.append(
+            {
+                "market_key": market_key,
+                "title": MARKET_TITLES.get(market_key, market_key),
+                "bookmaker_key": bookmaker_key,
+                "bookmaker_title": bookmaker.get("title") or bookmaker_key,
+                "outcomes": [format_outcome(row) for row in sort_outcomes(market_rows)],
+            }
+        )
+    return markets
+
+
 def sort_outcomes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    order = {"home_win": 0, "draw": 1, "away_win": 2}
-    return sorted(rows, key=lambda row: order.get(row["selection_key"], 99))
+    order = {
+        "home_win": 0,
+        "draw": 1,
+        "away_win": 2,
+    }
+
+    def sort_key(row: dict[str, Any]) -> int:
+        selection_key = row["selection_key"]
+        if selection_key in order:
+            return order[selection_key]
+        if selection_key.startswith("total_over"):
+            return 3
+        if selection_key.startswith("total_under"):
+            return 4
+        if selection_key.startswith("handicap_home"):
+            return 5
+        if selection_key.startswith("handicap_away"):
+            return 6
+        if selection_key.endswith("_yes"):
+            return 7
+        if selection_key.endswith("_no"):
+            return 8
+        return 99
+
+    return sorted(rows, key=sort_key)
 
 
 def format_team(team: dict[str, Any] | None, raw_name: str) -> dict[str, Any]:
@@ -173,9 +231,10 @@ def format_team(team: dict[str, Any] | None, raw_name: str) -> dict[str, Any]:
 
 
 def format_outcome(row: dict[str, Any]) -> dict[str, Any]:
+    name = row.get("selection_name_ru") or row["selection_name_raw"]
     return {
         "selection_key": row["selection_key"],
-        "label": SELECTION_LABELS.get(row["selection_key"], row["selection_key"]),
-        "name": row.get("selection_name_ru") or row["selection_name_raw"],
+        "label": SELECTION_LABELS.get(row["selection_key"], name),
+        "name": name,
         "price": float(row["price"]),
     }
