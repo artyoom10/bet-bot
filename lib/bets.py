@@ -9,6 +9,7 @@ from lib.users import first
 
 
 MAX_SELECTIONS = 10
+MIN_BET_AMOUNT = 30
 
 
 def place_bet(
@@ -17,8 +18,8 @@ def place_bet(
     amount: float,
     selections: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    if amount <= 0:
-        raise AppError("invalid_amount", "Amount must be positive", 400)
+    if amount < MIN_BET_AMOUNT:
+        raise AppError("invalid_amount", f"Минимальная ставка DEMO {MIN_BET_AMOUNT}", 400)
     if not selections:
         raise AppError("empty_selections", "Select at least one outcome", 400)
     if len(selections) > MAX_SELECTIONS:

@@ -12,6 +12,8 @@ const state = {
   users: [],
   aliases: null,
   teamAliasRows: [],
+  manualData: { sports: [], teams: [], events: [] },
+  selectedEventId: null,
   selections: [],
   ticketExpanded: false,
   stake: 100,
@@ -19,7 +21,11 @@ const state = {
 
 const labels = { home_win: 'П1', draw: 'X', away_win: 'П2' };
 const statusLabels = { pending: 'ожидает', won: 'выиграла', lost: 'проиграла', refund: 'возврат', cancelled: 'отменена' };
+const eventStatusLabels = { upcoming: 'ожидает', finished: 'завершён', cancelled: 'отменён' };
+const clientStatusLabels = { new: 'новый', active: 'активный', vip: 'VIP', test: 'тестовый', restricted: 'ограничен', suspended: 'приостановлен' };
 const defaultSportKeys = ['soccer_russia_premier_league', 'soccer_spain_la_liga', 'soccer_uefa_champs_league'];
+const minStake = 30;
+const stakePresets = [30, 50, 100, 200, 500];
 const adminTitles = {
   menu: 'Админка',
   sync: 'Синхронизация линии',
@@ -34,9 +40,21 @@ function money(value) {
 }
 
 function status(message) {
-  const root = document.querySelector('#status');
-  root.textContent = message || '';
-  root.hidden = !message;
+  if (message) notify(message);
+}
+
+function notify(message, type = 'info') {
+  const host = document.querySelector('#toast-host');
+  if (!host) return;
+  const item = document.createElement('div');
+  item.className = `toast ${type}`;
+  item.textContent = message;
+  host.appendChild(item);
+  window.setTimeout(() => item.classList.add('show'), 20);
+  window.setTimeout(() => {
+    item.classList.remove('show');
+    window.setTimeout(() => item.remove(), 220);
+  }, 3300);
 }
 
 function showLoading(title, text = 'Подождите, операция выполняется.') {
@@ -58,8 +76,35 @@ function showBlockedScreen(reason) {
   document.querySelector('#bet-slip').hidden = true;
   document.querySelector('#admin-drawer').classList.remove('open');
   document.querySelector('#admin-backdrop').hidden = true;
+  document.querySelector('#welcome-screen').hidden = true;
   document.querySelector('#blocked-reason').textContent = reason || 'Доступ к приложению временно ограничен.';
   document.querySelector('#blocked-screen').hidden = false;
+}
+
+function prepareWelcome() {
+  document.querySelector('#welcome-greeting').textContent = `${moscowGreeting()},`;
+  document.querySelector('#welcome-name').textContent = localStorage.getItem('betbot_profile_name') || telegramFallbackName() || 'Игрок';
+}
+
+function finishWelcome(name) {
+  if (name) {
+    localStorage.setItem('betbot_profile_name', name);
+    document.querySelector('#welcome-name').textContent = name;
+  }
+  window.setTimeout(() => {
+    document.querySelector('#welcome-screen').classList.add('hidden');
+    window.setTimeout(() => {
+      document.querySelector('#welcome-screen').hidden = true;
+    }, 260);
+  }, 650);
+}
+
+function moscowGreeting() {
+  const hour = Number(new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', hour12: false }).format(new Date()));
+  if (hour >= 5 && hour < 12) return 'Доброе утро';
+  if (hour >= 12 && hour < 18) return 'Добрый день';
+  if (hour >= 18 && hour < 23) return 'Добрый вечер';
+  return 'Доброй ночи';
 }
 
 async function apiFetch(path, options = {}) {
@@ -91,6 +136,7 @@ async function apiFetch(path, options = {}) {
 async function init() {
   const canUseApp = await loadMe().catch((error) => {
     status(`Профиль не загружен: ${error.message}`);
+    finishWelcome(telegramFallbackName() || 'Игрок');
     return false;
   });
   if (!canUseApp) return;
@@ -102,7 +148,8 @@ async function init() {
 async function loadMe() {
   const data = await apiFetch('/api/me');
   state.me = data;
-  document.querySelector('#profile-name').textContent = resolveProfileName(data);
+  const profileName = resolveProfileName(data);
+  document.querySelector('#profile-name').textContent = profileName;
   document.querySelector('#balance-value').textContent = money(data.wallet.balance);
   document.querySelectorAll('.admin-only').forEach((item) => {
     item.hidden = !data.user.is_admin;
@@ -112,6 +159,7 @@ async function loadMe() {
     return false;
   }
   status('');
+  finishWelcome(profileName);
   return true;
 }
 
@@ -120,6 +168,11 @@ function resolveProfileName(data) {
   const dbName = [data.user.first_name, data.user.last_name].filter(Boolean).join(' ');
   const tgName = [tgUser?.first_name, tgUser?.last_name].filter(Boolean).join(' ');
   return dbName || tgName || data.user.username || tgUser?.username || 'Игрок';
+}
+
+function telegramFallbackName() {
+  const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+  return [tgUser?.first_name, tgUser?.last_name].filter(Boolean).join(' ') || tgUser?.username || '';
 }
 
 async function loadSports() {
@@ -167,13 +220,19 @@ function renderEvents() {
     </section>
   `).join('');
   document.querySelectorAll('[data-event]').forEach((button) => {
-    button.addEventListener('click', () => toggleSelection(button));
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleSelection(button);
+    });
+  });
+  document.querySelectorAll('[data-open-event]').forEach((row) => {
+    row.addEventListener('click', () => openEventCard(row.dataset.openEvent));
   });
 }
 
 function renderEvent(event) {
   return `
-    <article class="event-row">
+    <article class="event-row" data-open-event="${event.id}">
       <div class="event-info">
         <time>${formatDate(event.commence_time)}</time>
         ${teamLine(event.home_team)}
@@ -208,6 +267,48 @@ function teamLogo(team) {
   return `<img class="team-logo" src="${escapeAttr(team.logo_url)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'team-logo placeholder', textContent: '${escapeAttr((team?.name || 'Ф')[0])}'}))">`;
 }
 
+function openEventCard(eventId) {
+  const event = state.events.find((item) => item.id === eventId);
+  if (!event) return;
+  state.selectedEventId = eventId;
+  document.querySelector('#event-card').innerHTML = `
+    <button class="modal-close" type="button" id="close-event-card">Закрыть</button>
+    <p class="label">${escapeHtml(event.league_title)}</p>
+    <div class="match-hero">
+      <div>${teamLogo(event.home_team)}<strong>${escapeHtml(event.home_team.name)}</strong></div>
+      <span>${formatDate(event.commence_time)}</span>
+      <div>${teamLogo(event.away_team)}<strong>${escapeHtml(event.away_team.name)}</strong></div>
+    </div>
+    <section class="market-section">
+      <h3>Исход матча</h3>
+      <div class="market-row">
+        ${event.odds.outcomes.map((outcome) => {
+          const active = state.selections.some((item) => item.event.id === event.id && item.outcome.selection_key === outcome.selection_key);
+          return `
+            <button class="odd-cell ${active ? 'active' : ''}" data-modal-selection data-event="${event.id}" data-bookmaker="${event.odds.bookmaker_key}" data-market="${event.odds.market_key}" data-selection="${outcome.selection_key}">
+              <span>${labels[outcome.selection_key] || outcome.label}</span><strong>${Number(outcome.price).toFixed(2)}</strong>
+            </button>
+          `;
+        }).join('')}
+      </div>
+    </section>
+  `;
+  document.querySelector('#event-modal').hidden = false;
+  document.querySelector('#close-event-card').addEventListener('click', closeEventCard);
+  document.querySelectorAll('[data-modal-selection]').forEach((button) => {
+    button.addEventListener('click', (eventClick) => {
+      eventClick.stopPropagation();
+      toggleSelection(button);
+      openEventCard(eventId);
+    });
+  });
+}
+
+function closeEventCard() {
+  document.querySelector('#event-modal').hidden = true;
+  state.selectedEventId = null;
+}
+
 function toggleSelection(button) {
   const event = state.events.find((item) => item.id === button.dataset.event);
   const outcome = event.odds.outcomes.find((item) => item.selection_key === button.dataset.selection);
@@ -226,21 +327,38 @@ function totalOdds() {
   return state.selections.reduce((acc, item) => acc * Number(item.outcome.price), 1);
 }
 
+function ticketValidation() {
+  const balance = Number(state.me?.wallet?.balance || 0);
+  if (state.stake < minStake) return { ok: false, message: `Минимальная ставка ${money(minStake)}` };
+  if (state.stake > balance) return { ok: false, message: 'Недостаточный баланс' };
+  return { ok: true, message: '' };
+}
+
 function renderTicket() {
   const slip = document.querySelector('#bet-slip');
   if (!state.selections.length) {
     slip.hidden = true;
+    slip.classList.remove('expanded');
     state.ticketExpanded = false;
     return;
   }
   slip.hidden = false;
+  slip.classList.toggle('expanded', state.ticketExpanded);
   const odds = totalOdds();
   const type = state.selections.length === 1 ? 'Ординар' : 'Экспресс';
+  const validation = ticketValidation();
   document.querySelector('#toggle-ticket').textContent = `${state.selections.length} пари · ${type} ${odds.toFixed(2)}`;
   document.querySelector('#ticket-form').hidden = !state.ticketExpanded;
   document.querySelector('#ticket-type').textContent = type;
   document.querySelector('#ticket-odds').textContent = odds.toFixed(2);
   document.querySelector('#ticket-win').textContent = money(state.stake * odds);
+  document.querySelector('#stake').classList.toggle('invalid', !validation.ok);
+  document.querySelector('#place-bet').disabled = !validation.ok;
+  document.querySelector('#stake-error').hidden = validation.ok;
+  document.querySelector('#stake-error').textContent = validation.message;
+  document.querySelector('#stake-presets').innerHTML = stakePresets.map((amount) => `
+    <button type="button" class="${Number(state.stake) === amount ? 'active' : ''}" data-stake-preset="${amount}">${money(amount).replace('DEMO ', '')}</button>
+  `).join('');
   document.querySelector('#ticket-list').innerHTML = state.selections.map((item, index) => `
     <article class="ticket-item">
       <div>
@@ -258,6 +376,13 @@ function renderTicket() {
       renderTicket();
     });
   });
+  document.querySelectorAll('[data-stake-preset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.stake = Number(button.dataset.stakePreset);
+      document.querySelector('#stake').value = state.stake;
+      renderTicket();
+    });
+  });
 }
 
 function clearTicket() {
@@ -268,23 +393,35 @@ function clearTicket() {
 
 async function submitBet() {
   if (!state.selections.length) return;
-  const result = await apiFetch('/api/bets', {
-    method: 'POST',
-    body: JSON.stringify({
-      amount: state.stake,
-      selections: state.selections.map((item) => ({
-        event_id: item.event.id,
-        bookmaker_key: item.bookmaker_key,
-        market_key: item.market_key,
-        selection_key: item.outcome.selection_key,
-      })),
-    }),
-  });
-  document.querySelector('#balance-value').textContent = money(result.wallet.balance);
-  status('Ставка принята');
-  tg?.HapticFeedback?.notificationOccurred('success');
-  clearTicket();
-  await loadBets();
+  const validation = ticketValidation();
+  if (!validation.ok) {
+    notify(validation.message, 'error');
+    renderTicket();
+    return;
+  }
+  showLoading('Ставка', 'Проверяю купон и баланс...');
+  try {
+    const result = await apiFetch('/api/bets', {
+      method: 'POST',
+      body: JSON.stringify({
+        amount: state.stake,
+        selections: state.selections.map((item) => ({
+          event_id: item.event.id,
+          bookmaker_key: item.bookmaker_key,
+          market_key: item.market_key,
+          selection_key: item.outcome.selection_key,
+        })),
+      }),
+    });
+    state.me.wallet = result.wallet;
+    document.querySelector('#balance-value').textContent = money(result.wallet.balance);
+    notify('Ставка принята', 'success');
+    tg?.HapticFeedback?.notificationOccurred('success');
+    clearTicket();
+    await loadBets();
+  } finally {
+    hideLoading();
+  }
 }
 
 async function loadBets() {
@@ -310,6 +447,25 @@ function renderBets() {
       <strong>${money(bet.possible_win)}</strong>
     </article>
   `).join('');
+}
+
+function openProfileCard() {
+  const user = state.me?.user;
+  const wallet = state.me?.wallet;
+  if (!user || !wallet) return;
+  document.querySelector('#profile-card-name').textContent = resolveProfileName(state.me);
+  document.querySelector('#profile-card-balance').textContent = money(wallet.balance);
+  document.querySelector('#profile-card-info').innerHTML = `
+    <div class="stat"><span>Telegram ID</span><strong>${escapeHtml(user.tg_id)}</strong></div>
+    <div class="stat"><span>Username</span><strong>${escapeHtml(user.username || 'не указан')}</strong></div>
+    <div class="stat"><span>Статус</span><strong>${escapeHtml(clientStatusLabels[user.client_status] || user.client_status || 'не указан')}</strong></div>
+    <div class="stat"><span>Баланс</span><strong>${money(wallet.balance)}</strong></div>
+  `;
+  document.querySelector('#profile-modal').hidden = false;
+}
+
+function closeProfileCard() {
+  document.querySelector('#profile-modal').hidden = true;
 }
 
 async function loadAdmin() {
@@ -422,7 +578,7 @@ function renderUsers() {
         <label>Username <input data-user-username="${user.id}" value="${escapeAttr(user.username || '')}" autocomplete="off"></label>
         <label>Имя <input data-user-first="${user.id}" value="${escapeAttr(user.first_name || '')}" autocomplete="off"></label>
         <label>Фамилия <input data-user-last="${user.id}" value="${escapeAttr(user.last_name || '')}" autocomplete="off"></label>
-        <label>Статус <select data-user-status="${user.id}">${['new', 'active', 'vip', 'test', 'restricted', 'suspended'].map((item) => `<option value="${item}" ${item === user.client_status ? 'selected' : ''}>${item}</option>`).join('')}</select></label>
+        <label>Статус <select data-user-status="${user.id}">${Object.entries(clientStatusLabels).map(([value, label]) => `<option value="${value}" ${value === user.client_status ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
         <label>Баланс <input data-user-balance="${user.id}" type="number" min="0" step="10" value="${Number(wallet?.balance || 0)}"></label>
         <label class="checkbox-row"><input data-user-blocked="${user.id}" type="checkbox" ${user.is_blocked ? 'checked' : ''}> Заблокирован</label>
         <button class="primary" data-save-user="${user.id}">Сохранить</button>
@@ -433,38 +589,48 @@ function renderUsers() {
 }
 
 async function saveUser(userId) {
-  await apiFetch(`/api/admin/users/${userId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({
-      tg_id: document.querySelector(`[data-user-tg="${userId}"]`).value,
-      username: document.querySelector(`[data-user-username="${userId}"]`).value,
-      first_name: document.querySelector(`[data-user-first="${userId}"]`).value,
-      last_name: document.querySelector(`[data-user-last="${userId}"]`).value,
-      client_status: document.querySelector(`[data-user-status="${userId}"]`).value,
-      balance: Number(document.querySelector(`[data-user-balance="${userId}"]`).value),
-      is_blocked: document.querySelector(`[data-user-blocked="${userId}"]`).checked,
-    }),
-  });
-  status('Пользователь обновлен');
-  await loadUsers();
+  showLoading('Пользователь', 'Сохраняю изменения...');
+  try {
+    await apiFetch(`/api/admin/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        tg_id: document.querySelector(`[data-user-tg="${userId}"]`).value,
+        username: document.querySelector(`[data-user-username="${userId}"]`).value,
+        first_name: document.querySelector(`[data-user-first="${userId}"]`).value,
+        last_name: document.querySelector(`[data-user-last="${userId}"]`).value,
+        client_status: document.querySelector(`[data-user-status="${userId}"]`).value,
+        balance: Number(document.querySelector(`[data-user-balance="${userId}"]`).value),
+        is_blocked: document.querySelector(`[data-user-blocked="${userId}"]`).checked,
+      }),
+    });
+    notify('Пользователь обновлен', 'success');
+    await loadUsers();
+  } finally {
+    hideLoading();
+  }
 }
 
 async function createUser(event) {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
-  await apiFetch('/api/admin/users', {
-    method: 'POST',
-    body: JSON.stringify({
-      tg_id: formData.get('tg_id'),
-      username: formData.get('username'),
-      first_name: formData.get('first_name'),
-      last_name: formData.get('last_name'),
-      balance: Number(formData.get('balance')),
-    }),
-  });
-  closeCreateUserModal();
-  status('Пользователь создан');
-  await loadUsers();
+  showLoading('Пользователь', 'Создаю профиль...');
+  try {
+    await apiFetch('/api/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({
+        tg_id: formData.get('tg_id'),
+        username: formData.get('username'),
+        first_name: formData.get('first_name'),
+        last_name: formData.get('last_name'),
+        balance: Number(formData.get('balance')),
+      }),
+    });
+    closeCreateUserModal();
+    notify('Пользователь создан', 'success');
+    await loadUsers();
+  } finally {
+    hideLoading();
+  }
 }
 
 async function loadAliases() {
@@ -637,6 +803,98 @@ async function loadAdminEvents() {
   renderManualEventOptions();
 }
 
+async function loadManualConstructor() {
+  state.manualData = await apiFetch('/api/admin/manual-events');
+  renderManualConstructor();
+}
+
+function renderManualConstructor() {
+  const sportSelect = document.querySelector('#manual-event-sport');
+  const homeSelect = document.querySelector('#manual-event-home');
+  const awaySelect = document.querySelector('#manual-event-away');
+  if (!sportSelect || !homeSelect || !awaySelect) return;
+
+  sportSelect.innerHTML = `<option value="">Выберите соревнование</option>${state.manualData.sports.map((sport) => `
+    <option value="${escapeAttr(sport.sport_key)}">${escapeHtml(sport.title_ru || sport.title_en || sport.sport_key)}</option>
+  `).join('')}`;
+  const teamOptions = `<option value="">Выберите команду</option>${state.manualData.teams.map((team) => `
+    <option value="${escapeAttr(team.id)}">${escapeHtml(team.name_ru || team.name_en)}</option>
+  `).join('')}`;
+  homeSelect.innerHTML = teamOptions;
+  awaySelect.innerHTML = teamOptions;
+
+  const list = document.querySelector('#manual-events-list');
+  list.innerHTML = state.manualData.events.length ? state.manualData.events.map((event) => `
+    <article class="admin-card">
+      <div class="card-head">
+        <strong>${escapeHtml(event.home_team_raw)} — ${escapeHtml(event.away_team_raw)}</strong>
+        <span>${escapeHtml(eventStatusLabels[event.status] || event.status)}</span>
+      </div>
+      <p class="muted">${escapeHtml(sportTitle(event.sport_key))} · ${formatDate(event.commence_time)}</p>
+      <div class="form-grid manual-result-row">
+        <input data-manual-home-score="${event.id}" type="number" min="0" placeholder="Счёт 1">
+        <input data-manual-away-score="${event.id}" type="number" min="0" placeholder="Счёт 2">
+        <button class="primary" data-manual-event-settle="${event.id}" type="button">Рассчитать</button>
+      </div>
+    </article>
+  `).join('') : '<p class="muted">Ручных матчей пока нет.</p>';
+  document.querySelectorAll('[data-manual-event-settle]').forEach((button) => {
+    button.addEventListener('click', () => settleManualListEvent(button.dataset.manualEventSettle));
+  });
+}
+
+async function createManualEvent(event) {
+  event.preventDefault();
+  showLoading('Создание матча', 'Сохраняю матч и коэффициенты...');
+  try {
+    const result = await apiFetch('/api/admin/manual-events', {
+      method: 'POST',
+      body: JSON.stringify({
+        sport_type: document.querySelector('#manual-event-type').value,
+        sport_key: document.querySelector('#manual-event-sport').value,
+        sport_title: document.querySelector('#manual-event-sport-new').value,
+        home_team_id: document.querySelector('#manual-event-home').value,
+        home_team_name: document.querySelector('#manual-event-home-new').value,
+        away_team_id: document.querySelector('#manual-event-away').value,
+        away_team_name: document.querySelector('#manual-event-away-new').value,
+        commence_time: document.querySelector('#manual-event-time').value,
+        home_price: document.querySelector('#manual-odd-home').value,
+        draw_price: document.querySelector('#manual-odd-draw').value,
+        away_price: document.querySelector('#manual-odd-away').value,
+      }),
+    });
+    state.manualData = result;
+    renderManualConstructor();
+    await loadSports().catch(() => {});
+    await loadEvents().catch(() => {});
+    event.currentTarget.reset();
+    notify('Матч создан', 'success');
+  } finally {
+    hideLoading();
+  }
+}
+
+async function settleManualListEvent(eventId) {
+  const home = Number(document.querySelector(`[data-manual-home-score="${eventId}"]`).value);
+  const away = Number(document.querySelector(`[data-manual-away-score="${eventId}"]`).value);
+  if (Number.isNaN(home) || Number.isNaN(away)) {
+    notify('Введите счёт матча', 'error');
+    return;
+  }
+  showLoading('Ручной расчёт', 'Сохраняю результат...');
+  try {
+    const result = await apiFetch(`/api/admin/events/${eventId}/manual-result`, {
+      method: 'POST',
+      body: JSON.stringify({ home_score: home, away_score: away }),
+    });
+    notify(`Рассчитано ставок: ${result.result.bets_settled}`, 'success');
+    await loadManualConstructor();
+    await loadSettlementRuns().catch(() => {});
+  } finally {
+    hideLoading();
+  }
+}
+
 function renderManualEventOptions() {
   const select = document.querySelector('#manual-event');
   if (!select) return;
@@ -653,12 +911,17 @@ async function manualSettle() {
   const eventId = document.querySelector('#manual-event').value;
   const home = Number(document.querySelector('#manual-home-score').value);
   const away = Number(document.querySelector('#manual-away-score').value);
-  const result = await apiFetch(`/api/admin/events/${eventId}/manual-result`, {
-    method: 'POST',
-    body: JSON.stringify({ home_score: home, away_score: away }),
-  });
-  status(`Рассчитано ставок: ${result.result.bets_settled}`);
-  await loadSettlementRuns();
+  showLoading('Ручной расчёт', 'Сохраняю результат...');
+  try {
+    const result = await apiFetch(`/api/admin/events/${eventId}/manual-result`, {
+      method: 'POST',
+      body: JSON.stringify({ home_score: home, away_score: away }),
+    });
+    notify(`Рассчитано ставок: ${result.result.bets_settled}`, 'success');
+    await loadSettlementRuns();
+  } finally {
+    hideLoading();
+  }
 }
 
 function openAdminDrawer(route = 'menu') {
@@ -691,6 +954,7 @@ function navigateAdmin(route = 'menu') {
   if (route === 'results') {
     loadSettlementRuns().catch((error) => status(error.message));
     loadAdminEvents().catch((error) => status(error.message));
+    loadManualConstructor().catch((error) => status(error.message));
   }
 }
 
@@ -735,6 +999,18 @@ function setupSwipe() {
     if (startX > window.innerWidth - 48 && dx < -60 && state.me?.user?.is_admin) openAdminDrawer('menu');
     if (document.querySelector('#admin-drawer').classList.contains('open') && dx > 70) closeAdminDrawer();
   }, { passive: true });
+
+  const handle = document.querySelector('#ticket-handle');
+  let ticketStartY = 0;
+  handle.addEventListener('touchstart', (event) => {
+    ticketStartY = event.touches[0].clientY;
+  }, { passive: true });
+  handle.addEventListener('touchend', (event) => {
+    if (event.changedTouches[0].clientY - ticketStartY > 36) {
+      state.ticketExpanded = false;
+      renderTicket();
+    }
+  }, { passive: true });
 }
 
 function groupBy(items, getKey) {
@@ -747,12 +1023,12 @@ function groupBy(items, getKey) {
 }
 
 function sportTitle(sportKey) {
-  const sport = [...(state.aliases?.sports || []), ...(state.sports || [])].find((item) => item.sport_key === sportKey);
+  const sport = [...(state.aliases?.sports || []), ...(state.manualData?.sports || []), ...(state.sports || [])].find((item) => item.sport_key === sportKey);
   return sport?.title_ru || sport?.title || sport?.title_en || sportKey;
 }
 
 function syncSportKeys() {
-  const keys = state.sports.map((sport) => sport.sport_key).filter(Boolean);
+  const keys = state.sports.map((sport) => sport.sport_key).filter((key) => key && !key.startsWith('manual_'));
   return keys.length ? keys : defaultSportKeys;
 }
 
@@ -795,12 +1071,24 @@ document.querySelector('#toggle-ticket').addEventListener('click', () => {
   state.ticketExpanded = !state.ticketExpanded;
   renderTicket();
 });
+document.querySelector('#ticket-handle').addEventListener('click', () => {
+  state.ticketExpanded = false;
+  renderTicket();
+});
 document.querySelector('#clear-ticket').addEventListener('click', clearTicket);
 document.querySelector('#stake').addEventListener('input', (event) => {
   state.stake = Number(event.target.value);
   renderTicket();
 });
 document.querySelector('#place-bet').addEventListener('click', () => submitBet().catch((error) => status(error.message)));
+document.querySelector('#open-profile').addEventListener('click', openProfileCard);
+document.querySelector('#close-profile').addEventListener('click', closeProfileCard);
+document.querySelector('#profile-modal').addEventListener('click', (event) => {
+  if (event.target.id === 'profile-modal') closeProfileCard();
+});
+document.querySelector('#event-modal').addEventListener('click', (event) => {
+  if (event.target.id === 'event-modal') closeEventCard();
+});
 document.querySelector('#open-admin').addEventListener('click', () => openAdminDrawer('menu'));
 document.querySelector('#close-admin').addEventListener('click', closeAdminDrawer);
 document.querySelector('#admin-backdrop').addEventListener('click', closeAdminDrawer);
@@ -817,10 +1105,15 @@ document.querySelector('#sync-results').addEventListener('click', () => syncResu
   renderActionError(error, '#settlement-report');
 }));
 document.querySelector('#manual-settle').addEventListener('click', () => manualSettle().catch((error) => status(error.message)));
+document.querySelector('#manual-event-form').addEventListener('submit', (event) => createManualEvent(event).catch((error) => {
+  notify(error.message, 'error');
+  hideLoading();
+}));
 document.querySelector('#open-create-user').addEventListener('click', openCreateUserModal);
 document.querySelector('#close-create-user').addEventListener('click', closeCreateUserModal);
 document.querySelector('#create-user-form').addEventListener('submit', (event) => createUser(event).catch((error) => status(error.message)));
 window.addEventListener('hashchange', handleHash);
 
+prepareWelcome();
 setupSwipe();
 init();

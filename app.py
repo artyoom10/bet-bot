@@ -1,7 +1,8 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from traceback import format_exception
 from typing import Any
+from uuid import uuid4
 
 import requests
 from dotenv import load_dotenv
@@ -262,6 +263,22 @@ def api_admin_events():
     require_admin(request, db)
     events = db.select("events", {"select": "*", "order": "commence_time.desc", "limit": "100"})
     return jsonify(events)
+
+
+@app.get("/api/admin/manual-events")
+def api_admin_manual_events():
+    db = get_db()
+    require_admin(request, db)
+    return jsonify({"ok": True, **manual_events_payload(db)})
+
+
+@app.post("/api/admin/manual-events")
+def api_admin_create_manual_event():
+    db = get_db()
+    admin_user = require_admin(request, db)
+    payload = request.get_json(silent=True) or {}
+    result = create_manual_event(db, admin_user, payload)
+    return jsonify({"ok": True, **result, **manual_events_payload(db)})
 
 
 @app.post("/api/admin/users")
@@ -582,6 +599,180 @@ def requested_sport_keys(payload: dict[str, Any]) -> list[str] | None:
     if isinstance(sport_keys, list):
         return [str(item) for item in sport_keys if item]
     return None
+
+
+def manual_events_payload(db) -> dict[str, Any]:
+    sports = db.select("sports", {"select": "*", "order": "title_ru.asc", "limit": "200"})
+    teams = db.select("teams", {"select": "*", "is_active": "eq.true", "order": "name_ru.asc", "limit": "500"})
+    events = db.select(
+        "events",
+        {
+            "select": "*",
+            "source": "eq.manual",
+            "order": "commence_time.desc",
+            "limit": "100",
+        },
+    )
+    return {"sports": sports, "teams": teams, "events": events}
+
+
+def create_manual_event(db, admin_user: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    sport = ensure_manual_sport(db, payload)
+    sport_type = manual_sport_type(payload)
+    home_team = ensure_manual_team(db, payload.get("home_team_id"), payload.get("home_team_name"), sport_type)
+    away_team = ensure_manual_team(db, payload.get("away_team_id"), payload.get("away_team_name"), sport_type)
+    if home_team["id"] == away_team["id"]:
+        raise AppError("same_team", "Выберите разные команды", 400)
+
+    commence_time = parse_manual_datetime(payload.get("commence_time"))
+    now = datetime.now(timezone.utc).isoformat()
+    event = first(
+        db.insert(
+            "events",
+            {
+                "source": "manual",
+                "external_event_id": f"manual:{uuid4().hex}",
+                "sport_key": sport["sport_key"],
+                "home_team_id": home_team["id"],
+                "away_team_id": away_team["id"],
+                "home_team_raw": home_team["name_en"],
+                "away_team_raw": away_team["name_en"],
+                "commence_time": commence_time,
+                "status": "upcoming",
+                "raw_payload": {"created_by": "admin_constructor", "admin_tg_id": admin_user.get("tg_id")},
+                "last_odds_sync_at": now,
+                "updated_at": now,
+            },
+        )
+    )
+    if not event:
+        raise AppError("manual_event_create_failed", "Не удалось создать матч", 500)
+
+    db.upsert("bookmakers", {"bookmaker_key": "manual", "title": "Manual", "updated_at": now}, "bookmaker_key")
+    odds = {
+        "home_win": parse_price(payload.get("home_price", 1.8), "П1"),
+        "draw": parse_price(payload.get("draw_price", 3.2), "X"),
+        "away_win": parse_price(payload.get("away_price", 2.1), "П2"),
+    }
+    rows = []
+    for key, price in odds.items():
+        rows.append(
+            {
+                "event_id": event["id"],
+                "bookmaker_key": "manual",
+                "market_key": "h2h",
+                "selection_key": key,
+                "selection_name_raw": selection_name(key, home_team, away_team),
+                "selection_name_ru": selection_name(key, home_team, away_team),
+                "price": price,
+                "api_last_update": now,
+                "updated_at": now,
+            }
+        )
+    db.upsert("odds_current", rows, "event_id,bookmaker_key,market_key,selection_key")
+    return {"event": event}
+
+
+def ensure_manual_sport(db, payload: dict[str, Any]) -> dict[str, Any]:
+    title = str(payload.get("sport_title") or "").strip()
+    sport_key = str(payload.get("sport_key") or "").strip()
+    if title:
+        sport_key = f"manual_{slugify(title)}_{uuid4().hex[:6]}"
+        sport = first(
+            db.insert(
+                "sports",
+                {
+                    "source": "manual",
+                    "sport_key": sport_key,
+                    "title_en": title,
+                    "title_ru": title,
+                    "group_name": "Manual",
+                    "is_enabled": True,
+                },
+            )
+        )
+        if not sport:
+            raise AppError("sport_create_failed", "Не удалось создать соревнование", 500)
+        return sport
+
+    if not sport_key:
+        raise AppError("sport_required", "Выберите или создайте соревнование", 400)
+    sport = first(db.select("sports", {"select": "*", "sport_key": f"eq.{sport_key}", "limit": "1"}))
+    if not sport:
+        raise AppError("sport_not_found", "Соревнование не найдено", 404)
+    return sport
+
+
+def ensure_manual_team(db, team_id: str | None, name: str | None, sport_type: str) -> dict[str, Any]:
+    if team_id:
+        team = first(db.select("teams", {"select": "*", "id": f"eq.{team_id}", "limit": "1"}))
+        if team:
+            return team
+
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        raise AppError("team_required", "Выберите команду или введите новую", 400)
+
+    existing = first(db.select("teams", {"select": "*", "name_ru": f"eq.{clean_name}", "limit": "1"}))
+    if existing:
+        return existing
+
+    team = first(
+        db.insert(
+            "teams",
+            {
+                "name_en": clean_name,
+                "name_ru": clean_name,
+                "short_name_ru": clean_name,
+                "slug": f"{slugify(clean_name)}-{uuid4().hex[:8]}",
+                "sport_type": sport_type,
+            },
+        )
+    )
+    if not team:
+        raise AppError("team_create_failed", "Не удалось создать команду", 500)
+    return team
+
+
+def manual_sport_type(payload: dict[str, Any]) -> str:
+    value = str(payload.get("sport_type") or "soccer").strip().lower()
+    return value if value else "soccer"
+
+
+def parse_manual_datetime(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise AppError("commence_time_required", "Укажите дату и время матча", 400)
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise AppError("invalid_commence_time", "Некорректная дата матча", 400) from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone(timedelta(hours=3)))
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+def parse_price(value: Any, label: str) -> float:
+    try:
+        price = round(float(value), 2)
+    except (TypeError, ValueError) as exc:
+        raise AppError("invalid_price", f"Некорректный коэффициент {label}", 400) from exc
+    if price <= 1:
+        raise AppError("invalid_price", f"Коэффициент {label} должен быть больше 1", 400)
+    return price
+
+
+def selection_name(key: str, home_team: dict[str, Any], away_team: dict[str, Any]) -> str:
+    if key == "home_win":
+        return home_team["name_ru"]
+    if key == "away_win":
+        return away_team["name_ru"]
+    return "Ничья"
+
+
+def slugify(value: str) -> str:
+    cleaned = "".join(char.lower() if char.isalnum() else "-" for char in value)
+    return "-".join(part for part in cleaned.split("-") if part)[:70] or "item"
 
 
 def safe_debug_select(db, table: str, params: dict[str, Any]) -> dict[str, Any]:
