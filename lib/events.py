@@ -123,6 +123,9 @@ def get_sports_for_app(db: SupabaseRestClient) -> list[dict[str, Any]]:
     sports = db.select("sports", {"select": "*", "is_enabled": "eq.true", "order": "sport_key.asc"})
     if not sports:
         sports = default_sports()
+    else:
+        existing_keys = {sport["sport_key"] for sport in sports}
+        sports = [*sports, *(sport for sport in default_sports() if sport["sport_key"] not in existing_keys)]
 
     events = db.select(
         "events",
