@@ -136,9 +136,7 @@
           <p class="label">Управление</p>
           <h2 id="admin-title">Админка</h2>
         </div>
-        <button class="icon-button" id="close-admin" type="button" aria-label="Закрыть админку">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
-        </button>
+        <button class="back-button admin-exit" id="close-admin" type="button">Линия</button>
       </header>
 
       <section class="admin-page active" id="admin-page-menu">
@@ -154,16 +152,20 @@
           <span class="admin-link-icon">03</span>
           <span><strong>Пользователи</strong><small>Баланс, статусы и блокировки</small></span>
         </button>
-        <button class="admin-link" data-admin-link="aliases">
+        <button class="admin-link" data-admin-link="all-bets">
           <span class="admin-link-icon">04</span>
+          <span><strong>Все ставки</strong><small>Сортировка по времени, пользователю и сумме</small></span>
+        </button>
+        <button class="admin-link" data-admin-link="aliases">
+          <span class="admin-link-icon">05</span>
           <span><strong>Алиасы и команды</strong><small>Русские названия, лого и группировка</small></span>
         </button>
         <button class="admin-link" data-admin-link="constructor">
-          <span class="admin-link-icon">05</span>
+          <span class="admin-link-icon">06</span>
           <span><strong>Конструктор событий</strong><small>Ручные матчи и рынки</small></span>
         </button>
         <button class="admin-link" data-admin-link="results">
-          <span class="admin-link-icon">06</span>
+          <span class="admin-link-icon">07</span>
           <span><strong>Расчёт ставок</strong><small>Результаты, ручной счёт и выплаты</small></span>
         </button>
       </section>
@@ -200,6 +202,23 @@
           <button class="primary" id="open-create-user">Добавить пользователя</button>
         </div>
         <div class="stack" id="admin-users"></div>
+      </section>
+
+      <section class="admin-page" id="admin-page-all-bets">
+        <button class="back-button" data-admin-back>Назад</button>
+        <div class="admin-actions">
+          <label class="inline-control">Сортировка
+            <select id="admin-bets-sort">
+              <option value="created_desc">Сначала новые</option>
+              <option value="created_asc">Сначала старые</option>
+              <option value="user">По пользователю</option>
+              <option value="amount_desc">По сумме: больше</option>
+              <option value="amount_asc">По сумме: меньше</option>
+            </select>
+          </label>
+          <button class="primary" id="reload-admin-bets" type="button">Обновить ставки</button>
+        </div>
+        <div class="stack" id="admin-all-bets"></div>
       </section>
 
       <section class="admin-page" id="admin-page-aliases">
@@ -350,6 +369,10 @@
               <button class="back-button" id="manual-wizard-cancel" type="button" hidden>Отменить редактирование</button>
             </div>
           </form>
+        </article>
+        <article class="panel">
+          <h2>Ручные соревнования</h2>
+          <div id="manual-sports-list" class="stack"></div>
         </article>
         <article class="panel">
           <h2>Созданные события</h2>

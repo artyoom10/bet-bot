@@ -13,11 +13,13 @@ TELEGRAM_WEBAPP_URL=
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 ODDS_API_KEY=
+ODDS_API_REGIONS=eu
 ADMIN_TELEGRAM_IDS=
 DEBUG_ADMIN=0
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, and `ODDS_API_KEY` are backend-only secrets.
+`ODDS_API_REGIONS` can be expanded, for example `eu,uk`, if a league has events but no odds in the current region.
 
 ## Supabase setup
 
@@ -42,6 +44,8 @@ This adds result fields, payout fields, express settlement status, logo support,
 - `POST /api/admin/users`
 - `PATCH /api/admin/users/:id`
 - `GET /api/admin/events`
+- `GET /api/admin/bets`
+- `DELETE /api/admin/manual-sports/:sport_key`
 - `GET /api/admin/aliases`
 - `POST /api/admin/team-aliases`
 - `PATCH /api/admin/teams/:id`

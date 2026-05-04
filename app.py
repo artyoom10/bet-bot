@@ -12,7 +12,7 @@ from lib.admin_auth import require_admin
 from lib.admin_aliases import create_team_alias, get_aliases_dashboard, update_sport_alias, update_team_alias
 from lib.admin_users import create_admin_user, list_admin_users, update_admin_user
 from lib.bets import get_user_bets, place_bet
-from lib.config import admin_tg_ids, app_name
+from lib.config import SPORT_KEYS, admin_tg_ids, app_name
 from lib.errors import AppError, error_response
 from lib.events import default_sports, get_events_for_app, get_sports_for_app
 from lib.odds_sync import refresh_odds_usage, run_odds_sync
@@ -298,6 +298,14 @@ def api_admin_delete_manual_event(event_id: str):
     return jsonify({"ok": True, **result, **manual_events_payload(db)})
 
 
+@app.delete("/api/admin/manual-sports/<path:sport_key>")
+def api_admin_delete_manual_sport(sport_key: str):
+    db = get_db()
+    admin_user = require_admin(request, db)
+    result = delete_manual_sport(db, admin_user, sport_key)
+    return jsonify({"ok": True, **result, **manual_events_payload(db)})
+
+
 @app.post("/api/admin/users")
 def api_admin_create_user():
     db = get_db()
@@ -418,6 +426,15 @@ def api_admin_create_team_alias():
     admin_user = require_admin(request, db)
     payload = request.get_json(silent=True) or {}
     return jsonify({"ok": True, **create_team_alias(db, admin_user, payload)})
+
+
+@app.get("/api/admin/bets")
+def api_admin_bets():
+    db = get_db()
+    require_admin(request, db)
+    sort = request.args.get("sort", "created_desc")
+    limit = request.args.get("limit", "200")
+    return jsonify({"ok": True, "bets": admin_bets_payload(db, sort=sort, limit=limit)})
 
 
 @app.post("/webhook")
@@ -572,9 +589,24 @@ def sync_error_json(db, error_code: str, exc: Exception, payload: dict[str, Any]
 
 def sync_endpoint_debug(db, payload: dict[str, Any]) -> dict[str, Any]:
     debug = base_endpoint_debug(payload)
+    sports = requested_sport_keys(payload) or SPORT_KEYS
+    debug["requested_sport_keys"] = sports
     debug["sync_runs"] = safe_debug_select(db, "sync_runs", {"select": "*", "order": "started_at.desc", "limit": "5"})
     debug["last_sync"] = normalize_last_sync(first(debug["sync_runs"]["rows"])) if debug["sync_runs"].get("ok") else None
     debug["sports"] = safe_debug_select(db, "sports", {"select": "*", "order": "sport_key.asc", "limit": "20"})
+    debug["requested_sport_events"] = {
+        sport_key: safe_debug_select(
+            db,
+            "events",
+            {
+                "select": "id,sport_key,external_event_id,home_team_raw,away_team_raw,status,commence_time,last_odds_sync_at,updated_at",
+                "sport_key": f"eq.{sport_key}",
+                "order": "commence_time.asc",
+                "limit": "20",
+            },
+        )
+        for sport_key in sports
+    }
     debug["recent_events"] = safe_debug_select(
         db,
         "events",
@@ -648,6 +680,66 @@ def manual_events_payload(db) -> dict[str, Any]:
         for event in events:
             event["odds"] = odds_by_event.get(event["id"], [])
     return {"sports": sports, "teams": teams, "events": events}
+
+
+def admin_bets_payload(db, *, sort: str, limit: str) -> list[dict[str, Any]]:
+    try:
+        parsed_limit = min(max(int(limit), 1), 500)
+    except (TypeError, ValueError):
+        parsed_limit = 200
+
+    order_map = {
+        "created_desc": "created_at.desc",
+        "created_asc": "created_at.asc",
+        "amount_desc": "amount.desc",
+        "amount_asc": "amount.asc",
+    }
+    bets = db.select(
+        "bets",
+        {
+            "select": "*",
+            "order": order_map.get(sort, "created_at.desc"),
+            "limit": str(parsed_limit),
+        },
+    )
+    if not bets:
+        return []
+
+    user_ids = sorted({bet["user_id"] for bet in bets if bet.get("user_id")})
+    bet_ids = [bet["id"] for bet in bets if bet.get("id")]
+    users = db.select("users", {"select": "id,tg_id,username,first_name,last_name,client_status,is_blocked", "id": f"in.({','.join(user_ids)})"}) if user_ids else []
+    selections = db.select("bet_selections", {"select": "*", "bet_id": f"in.({','.join(bet_ids)})", "order": "created_at.asc"}) if bet_ids else []
+
+    users_by_id = {user["id"]: user for user in users}
+    selections_by_bet: dict[str, list[dict[str, Any]]] = {}
+    for selection in selections:
+        selection["price"] = float(selection.get("price") or 0)
+        selections_by_bet.setdefault(selection["bet_id"], []).append(selection)
+
+    rows = []
+    for bet in bets:
+        item = {
+            "bet": {
+                **bet,
+                "amount": float(bet.get("amount") or 0),
+                "total_odds": float(bet.get("total_odds") or 0),
+                "possible_win": float(bet.get("possible_win") or 0),
+                "payout": float(bet.get("payout") or 0) if bet.get("payout") is not None else None,
+            },
+            "user": users_by_id.get(bet.get("user_id")),
+            "selections": selections_by_bet.get(bet["id"], []),
+        }
+        rows.append(item)
+
+    if sort == "user":
+        rows.sort(key=lambda row: (user_sort_name(row.get("user")), row["bet"].get("created_at") or ""), reverse=False)
+    return rows
+
+
+def user_sort_name(user: dict[str, Any] | None) -> str:
+    if not user:
+        return ""
+    return " ".join([str(user.get("first_name") or ""), str(user.get("last_name") or ""), str(user.get("username") or ""), str(user.get("tg_id") or "")]).strip().lower()
 
 
 def create_manual_event(db, admin_user: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -748,8 +840,39 @@ def delete_manual_event(db, admin_user: dict[str, Any], event_id: str) -> dict[s
         settled = settle_pending_bets(db, [event_id])
         return {"deleted": False, "cancelled": True, "event": event, "bets_settled": settled}
 
+    db.delete("odds_current", {"event_id": f"eq.{event_id}", "bookmaker_key": "eq.manual"})
     deleted = db.delete("events", {"id": f"eq.{event_id}", "source": "eq.manual"})
     return {"deleted": True, "event": first(deleted) or existing}
+
+
+def delete_manual_sport(db, admin_user: dict[str, Any], sport_key: str) -> dict[str, Any]:
+    sport = first(db.select("sports", {"select": "*", "sport_key": f"eq.{sport_key}", "source": "eq.manual", "limit": "1"}))
+    if not sport:
+        raise AppError("manual_sport_not_found", "Ручное соревнование не найдено", 404)
+
+    events = db.select("events", {"select": "id", "sport_key": f"eq.{sport_key}", "source": "eq.manual", "limit": "500"})
+    summary = {"events_deleted": 0, "events_cancelled": 0, "bets_settled": 0}
+    for event in events:
+        result = delete_manual_event(db, admin_user, event["id"])
+        if result.get("deleted"):
+            summary["events_deleted"] += 1
+        if result.get("cancelled"):
+            summary["events_cancelled"] += 1
+        summary["bets_settled"] += int(result.get("bets_settled") or 0)
+
+    remaining = db.select("events", {"select": "id", "sport_key": f"eq.{sport_key}", "limit": "1"})
+    if remaining:
+        disabled = first(
+            db.update(
+                "sports",
+                {"is_enabled": False, "updated_at": datetime.now(timezone.utc).isoformat()},
+                {"sport_key": f"eq.{sport_key}", "source": "eq.manual"},
+            )
+        )
+        return {"deleted": False, "disabled": True, "sport": disabled or sport, **summary}
+
+    deleted = db.delete("sports", {"sport_key": f"eq.{sport_key}", "source": "eq.manual"})
+    return {"deleted": True, "sport": first(deleted) or sport, **summary}
 
 
 def save_manual_odds(

@@ -12,6 +12,14 @@ BASE_URL = "https://api.the-odds-api.com/v4"
 ODDS_MARKETS = ("h2h", "spreads", "totals")
 
 
+def odds_regions() -> str:
+    return env("ODDS_API_REGIONS", "eu")
+
+
+def masked_url(response: requests.Response, api_key: str) -> str:
+    return response.url.replace(api_key, "***")
+
+
 def fetch_odds_for_sport(sport_key: str) -> dict[str, Any]:
     api_key = env("ODDS_API_KEY")
     if not api_key:
@@ -19,7 +27,7 @@ def fetch_odds_for_sport(sport_key: str) -> dict[str, Any]:
 
     params = {
         "apiKey": api_key,
-        "regions": "eu",
+        "regions": odds_regions(),
         "markets": ",".join(ODDS_MARKETS),
         "oddsFormat": "decimal",
         "dateFormat": "iso",
@@ -33,7 +41,31 @@ def fetch_odds_for_sport(sport_key: str) -> dict[str, Any]:
         "quota_remaining": header_int(response, "x-requests-remaining"),
         "quota_used": header_int(response, "x-requests-used"),
         "quota_last": header_int(response, "x-requests-last"),
-        "request_url": response.url.replace(api_key, "***"),
+        "request_url": masked_url(response, api_key),
+        "regions": params["regions"],
+        "markets": params["markets"],
+    }
+
+
+def fetch_events_for_sport(sport_key: str) -> dict[str, Any]:
+    api_key = env("ODDS_API_KEY")
+    if not api_key:
+        raise AppError("odds_api_not_configured", "ODDS_API_KEY is not configured", 500)
+
+    params = {
+        "apiKey": api_key,
+        "dateFormat": "iso",
+    }
+    response = requests.get(f"{BASE_URL}/sports/{sport_key}/events", params=params, timeout=20)
+    if response.status_code >= 400:
+        raise AppError("odds_api_error", f"Odds API events returned {response.status_code}: {response.text[:300]}", 502)
+
+    return {
+        "data": response.json(),
+        "quota_remaining": header_int(response, "x-requests-remaining"),
+        "quota_used": header_int(response, "x-requests-used"),
+        "quota_last": header_int(response, "x-requests-last"),
+        "request_url": masked_url(response, api_key),
     }
 
 
@@ -81,7 +113,7 @@ def fetch_scores_for_sport(
         "quota_remaining": header_int(response, "x-requests-remaining"),
         "quota_used": header_int(response, "x-requests-used"),
         "quota_last": header_int(response, "x-requests-last"),
-        "request_url": response.url.replace(api_key, "***"),
+        "request_url": masked_url(response, api_key),
     }
 
 

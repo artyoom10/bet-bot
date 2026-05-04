@@ -73,6 +73,7 @@ def update_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], team_i
     name_ru = clean_text(payload.get("name_ru"))
     short_name_ru = clean_text(payload.get("short_name_ru"))
     logo_url = clean_text(payload.get("logo_url"))
+    sport_type = clean_sport_type(payload.get("sport_type"))
     patch = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if name_ru:
         patch["name_ru"] = name_ru
@@ -80,6 +81,8 @@ def update_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], team_i
         patch["short_name_ru"] = short_name_ru
     if "logo_url" in payload:
         patch["logo_url"] = logo_url or None
+    if sport_type:
+        patch["sport_type"] = sport_type
     if len(patch) == 1:
         raise AppError("empty_payload", "Нет данных для обновления", 400)
 
@@ -94,27 +97,47 @@ def update_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], team_i
 def create_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     raw_name = clean_text(payload.get("raw_name"))
     sport_key = clean_text(payload.get("sport_key"))
+    team_id = clean_text(payload.get("team_id"))
     name_ru = clean_text(payload.get("name_ru"))
     short_name_ru = clean_text(payload.get("short_name_ru"))
     logo_url = clean_text(payload.get("logo_url"))
-    if not raw_name or not sport_key or not name_ru:
-        raise AppError("invalid_alias", "Нужны raw_name, sport_key и русское название", 400)
+    sport_type = clean_sport_type(payload.get("sport_type")) or sport_type_from_key(sport_key)
+    if not raw_name or not sport_key:
+        raise AppError("invalid_alias", "Нужны raw_name и sport_key", 400)
 
-    team = first(
-        db.insert(
-            "teams",
-            {
-                "name_en": raw_name,
-                "name_ru": name_ru,
-                "short_name_ru": short_name_ru or name_ru,
-                "slug": f"{slugify(raw_name)}-{uuid4().hex[:8]}",
-                "logo_url": logo_url or None,
-                "sport_type": "soccer",
-            },
+    if team_id:
+        team = first(db.select("teams", {"select": "*", "id": f"eq.{team_id}", "limit": "1"}))
+        if not team:
+            raise AppError("team_not_found", "Команда не найдена", 404)
+        team_patch = {"updated_at": datetime.now(timezone.utc).isoformat()}
+        if name_ru:
+            team_patch["name_ru"] = name_ru
+        if short_name_ru:
+            team_patch["short_name_ru"] = short_name_ru
+        if "logo_url" in payload:
+            team_patch["logo_url"] = logo_url or team.get("logo_url")
+        if sport_type:
+            team_patch["sport_type"] = sport_type
+        if len(team_patch) > 1:
+            team = first(db.update("teams", team_patch, {"id": f"eq.{team_id}"})) or team
+    else:
+        if not name_ru:
+            raise AppError("invalid_alias", "Выберите существующую команду или введите русское название", 400)
+        team = first(
+            db.insert(
+                "teams",
+                {
+                    "name_en": raw_name,
+                    "name_ru": name_ru,
+                    "short_name_ru": short_name_ru or name_ru,
+                    "slug": f"{slugify(raw_name)}-{uuid4().hex[:8]}",
+                    "logo_url": logo_url or None,
+                    "sport_type": sport_type,
+                },
+            )
         )
-    )
-    if not team:
-        raise AppError("team_create_failed", "Не удалось создать команду", 500)
+        if not team:
+            raise AppError("team_create_failed", "Не удалось создать команду", 500)
 
     alias = first(
         db.upsert(
@@ -135,6 +158,23 @@ def create_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], payloa
 
 def clean_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def clean_sport_type(value: Any) -> str:
+    sport_type = clean_text(value).lower()
+    if not sport_type:
+        return ""
+    if sport_type not in {"soccer", "hockey", "esports"}:
+        raise AppError("invalid_sport_type", "Выберите футбол, хоккей или киберспорт", 400)
+    return sport_type
+
+
+def sport_type_from_key(sport_key: str) -> str:
+    if "hockey" in sport_key:
+        return "hockey"
+    if "esports" in sport_key:
+        return "esports"
+    return "soccer"
 
 
 def slugify(value: str) -> str:

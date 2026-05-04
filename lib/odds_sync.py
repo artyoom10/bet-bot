@@ -6,7 +6,7 @@ from typing import Any
 
 from lib.config import SPORT_KEYS
 from lib.errors import AppError
-from lib.odds_api import fetch_odds_for_sport, refresh_usage as fetch_usage
+from lib.odds_api import fetch_events_for_sport, fetch_odds_for_sport, refresh_usage as fetch_usage
 from lib.supabase_client import SupabaseRestClient
 from lib.team_mapping import find_team_by_raw_name, resolve_selection_name_ru
 from lib.users import first
@@ -110,6 +110,7 @@ def run_odds_sync(
                 totals["quota_last_total"] += result.get("quota_last") or 0
                 totals["quota_remaining"] = result.get("quota_remaining")
                 totals["quota_used"] = result.get("quota_used")
+                request_urls.append(result.get("events_request_url"))
                 request_urls.append(result.get("request_url"))
                 sport_report.update(
                     {
@@ -176,55 +177,76 @@ def run_odds_sync(
 
 
 def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
+    events_api_result: dict[str, Any] | None = None
+    events_api_error: dict[str, Any] | None = None
+    try:
+        events_api_result = fetch_events_for_sport(sport_key)
+    except Exception as exc:
+        events_api_error = exception_debug(exc)
+
     api_result = fetch_odds_for_sport(sport_key)
     events = api_result["data"]
+    plain_events = events_api_result["data"] if events_api_result else []
 
     counts = {
+        "events_endpoint_count": len(plain_events),
+        "odds_endpoint_events_count": len(events),
         "api_events_count": len(events),
         "events_count": 0,
         "odds_count": 0,
         "bookmakers_count": 0,
         "snapshots_count": 0,
         "events_without_h2h": 0,
+        "events_without_odds": 0,
         "markets_requested": ["h2h", "spreads", "totals"],
+        "regions_requested": api_result.get("regions"),
         "double_chance_derived_count": 0,
         "quota_remaining": api_result.get("quota_remaining"),
         "quota_used": api_result.get("quota_used"),
         "quota_last": api_result.get("quota_last"),
+        "events_quota_remaining": events_api_result.get("quota_remaining") if events_api_result else None,
+        "events_quota_used": events_api_result.get("quota_used") if events_api_result else None,
+        "events_quota_last": events_api_result.get("quota_last") if events_api_result else None,
         "request_url": api_result.get("request_url"),
+        "events_request_url": events_api_result.get("request_url") if events_api_result else None,
+        "events_endpoint_error": events_api_error,
+        "events_without_odds_samples": [],
     }
 
+    saved_event_external_ids = set()
     now = datetime.now(timezone.utc).isoformat()
+    odds_event_ids = {source_event.get("id") for source_event in events}
+    for source_event in plain_events:
+        event = upsert_api_event(db, sport_key, source_event, now)
+        if not event:
+            continue
+        saved_event_external_ids.add(source_event.get("id"))
+        counts["events_count"] += 1
+        if source_event.get("id") not in odds_event_ids:
+            counts["events_without_odds"] += 1
+            if len(counts["events_without_odds_samples"]) < 8:
+                counts["events_without_odds_samples"].append(
+                    {
+                        "id": source_event.get("id"),
+                        "commence_time": source_event.get("commence_time"),
+                        "home_team": source_event.get("home_team"),
+                        "away_team": source_event.get("away_team"),
+                    }
+                )
+
     for source_event in events:
         home_raw = source_event["home_team"]
         away_raw = source_event["away_team"]
         home_team = find_team_by_raw_name(db, "odds_api", sport_key, home_raw)
         away_team = find_team_by_raw_name(db, "odds_api", sport_key, away_raw)
 
-        event = first(
-            db.upsert(
-                "events",
-                {
-                    "source": "odds_api",
-                    "external_event_id": source_event["id"],
-                    "sport_key": sport_key,
-                    "home_team_id": home_team.get("id") if home_team else None,
-                    "away_team_id": away_team.get("id") if away_team else None,
-                    "home_team_raw": home_raw,
-                    "away_team_raw": away_raw,
-                    "commence_time": source_event["commence_time"],
-                    "status": "upcoming",
-                    "raw_payload": source_event,
-                    "last_odds_sync_at": now,
-                    "updated_at": now,
-                },
-                "source,external_event_id",
-            )
-        )
+        event = upsert_api_event(db, sport_key, source_event, now, home_team=home_team, away_team=away_team)
         if not event:
             continue
 
-        counts["events_count"] += 1
+        if source_event.get("id") not in saved_event_external_ids:
+            counts["events_count"] += 1
+            saved_event_external_ids.add(source_event.get("id"))
         event_h2h_count = 0
         for bookmaker in source_event.get("bookmakers", []):
             bookmaker_key = bookmaker["key"]
@@ -303,6 +325,44 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
             counts["events_without_h2h"] += 1
 
     return counts
+
+
+def upsert_api_event(
+    db: SupabaseRestClient,
+    sport_key: str,
+    source_event: dict[str, Any],
+    now: str,
+    *,
+    home_team: dict[str, Any] | None = None,
+    away_team: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    home_raw = source_event["home_team"]
+    away_raw = source_event["away_team"]
+    if home_team is None:
+        home_team = find_team_by_raw_name(db, "odds_api", sport_key, home_raw)
+    if away_team is None:
+        away_team = find_team_by_raw_name(db, "odds_api", sport_key, away_raw)
+
+    return first(
+        db.upsert(
+            "events",
+            {
+                "source": "odds_api",
+                "external_event_id": source_event["id"],
+                "sport_key": sport_key,
+                "home_team_id": home_team.get("id") if home_team else None,
+                "away_team_id": away_team.get("id") if away_team else None,
+                "home_team_raw": home_raw,
+                "away_team_raw": away_raw,
+                "commence_time": source_event["commence_time"],
+                "status": "upcoming",
+                "raw_payload": source_event,
+                "last_odds_sync_at": now,
+                "updated_at": now,
+            },
+            "source,external_event_id",
+        )
+    )
 
 
 def ensure_sports_seed(db: SupabaseRestClient, sport_keys: list[str]) -> None:
