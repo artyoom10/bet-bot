@@ -30,6 +30,15 @@ const marketTitles = { h2h: 'Исход матча', totals: 'Тотал', sprea
 const defaultSportKeys = ['soccer_russia_premier_league', 'soccer_spain_la_liga', 'soccer_uefa_champs_league'];
 const minStake = 30;
 const stakePresets = [30, 50, 100, 200, 500];
+const welcomeMessages = [
+  'Собираем лучшие матчи...',
+  'Сейчас всё красиво откроется...',
+  'Судья добавил пару секунд...',
+  'Обновляем линию...',
+  'Экспресс готовится к взлёту...',
+  'VAR проверяет загрузку...',
+];
+let welcomeMessageTimer = null;
 const adminTitles = {
   menu: 'Админка',
   sync: 'Синхронизация линии',
@@ -49,17 +58,17 @@ function status(message) {
 }
 
 function notify(message, type = 'info') {
-  const host = document.querySelector('#toast-host');
-  if (!host) return;
-  const item = document.createElement('div');
-  item.className = `toast ${type}`;
-  item.textContent = message;
-  host.appendChild(item);
-  window.setTimeout(() => item.classList.add('show'), 20);
-  window.setTimeout(() => {
-    item.classList.remove('show');
-    window.setTimeout(() => item.remove(), 220);
-  }, 3300);
+  const modal = document.querySelector('#notice-modal');
+  if (!modal || !message) return;
+  const titles = { success: 'Готово', error: 'Ошибка', info: 'Сообщение' };
+  modal.className = `notice-modal ${type}`;
+  document.querySelector('#notice-title').textContent = titles[type] || titles.info;
+  document.querySelector('#notice-text').textContent = message;
+  modal.hidden = false;
+}
+
+function closeNotice() {
+  document.querySelector('#notice-modal').hidden = true;
 }
 
 function showLoading(title, text = 'Подождите, операция выполняется.') {
@@ -77,6 +86,8 @@ function hideLoading() {
 }
 
 function showBlockedScreen(reason) {
+  window.clearInterval(welcomeMessageTimer);
+  welcomeMessageTimer = null;
   document.querySelector('.page').hidden = true;
   document.querySelector('#bet-slip').hidden = true;
   document.querySelector('#admin-drawer').classList.remove('open');
@@ -89,6 +100,9 @@ function showBlockedScreen(reason) {
 function prepareWelcome() {
   document.querySelector('#welcome-greeting').textContent = `${moscowGreeting()},`;
   document.querySelector('#welcome-name').textContent = localStorage.getItem('betbot_profile_name') || telegramFallbackName() || 'Игрок';
+  updateWelcomeMessage(true);
+  window.clearInterval(welcomeMessageTimer);
+  welcomeMessageTimer = window.setInterval(() => updateWelcomeMessage(false), 1550);
 }
 
 function finishWelcome(name) {
@@ -96,12 +110,34 @@ function finishWelcome(name) {
     localStorage.setItem('betbot_profile_name', name);
     document.querySelector('#welcome-name').textContent = name;
   }
+  window.clearInterval(welcomeMessageTimer);
+  welcomeMessageTimer = null;
   window.setTimeout(() => {
     document.querySelector('#welcome-screen').classList.add('hidden');
     window.setTimeout(() => {
       document.querySelector('#welcome-screen').hidden = true;
     }, 360);
   }, 650);
+}
+
+function updateWelcomeMessage(initial = false) {
+  const target = document.querySelector('#welcome-status');
+  if (!target) return;
+  if (initial) {
+    target.textContent = randomWelcomeMessage();
+    target.classList.add('is-visible');
+    return;
+  }
+  target.classList.remove('is-visible');
+  window.setTimeout(() => {
+    target.textContent = randomWelcomeMessage(target.textContent);
+    target.classList.add('is-visible');
+  }, 140);
+}
+
+function randomWelcomeMessage(current = '') {
+  const pool = welcomeMessages.filter((message) => message !== current);
+  return pool[Math.floor(Math.random() * pool.length)] || welcomeMessages[0];
 }
 
 function moscowGreeting() {
@@ -192,7 +228,8 @@ function renderSports() {
   const items = [{ sport_key: '', title: 'Все', events_count: total }, ...state.sports];
   root.innerHTML = items.map((sport) => `
     <button class="sport-chip ${state.activeSport === sport.sport_key ? 'active' : ''}" data-sport="${sport.sport_key}">
-      <span>${escapeHtml(sport.title)}</span><strong>${sport.events_count}</strong>
+      <span class="sport-icon" aria-hidden="true">${sportIcon(sport.sport_key, sport.title)}</span>
+      <span class="sport-copy"><span>${escapeHtml(sport.title)}</span><strong>${sport.events_count}</strong></span>
     </button>
   `).join('');
   document.querySelectorAll('[data-sport]').forEach((button) => {
@@ -202,6 +239,20 @@ function renderSports() {
       await loadEvents();
     });
   });
+}
+
+function sportIcon(sportKey = '', title = '') {
+  const value = `${sportKey} ${title}`.toLowerCase();
+  if (!sportKey) {
+    return '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><path d="M8 6v12M16 6v12"/></svg>';
+  }
+  if (value.includes('hockey') || value.includes('хоккей')) {
+    return '<svg viewBox="0 0 24 24"><path d="M6 4v8.5c0 2.5 1.8 4.5 4.3 4.5H16"/><path d="M18 4v8.5c0 2.5-1.8 4.5-4.3 4.5H8"/><path d="M4 20h16"/><path d="M16 17l4 3"/></svg>';
+  }
+  if (value.includes('esport') || value.includes('кибер')) {
+    return '<svg viewBox="0 0 24 24"><path d="M7 9h10a4 4 0 0 1 4 4v2a3 3 0 0 1-5.2 2l-1.3-1H9.5l-1.3 1A3 3 0 0 1 3 15v-2a4 4 0 0 1 4-4Z"/><path d="M8 12v3M6.5 13.5h3M15 13h.01M18 13h.01"/></svg>';
+  }
+  return '<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/><path d="M12 7l3 2.2-1.1 3.5h-3.8L9 9.2 12 7Z"/><path d="M12 3v4M4.7 8.1 9 9.2M7.5 19l2.6-6.3M16.5 19l-2.6-6.3M19.3 8.1 15 9.2"/></svg>';
 }
 
 async function loadEvents() {
@@ -1133,6 +1184,8 @@ async function manualSettle() {
 
 function openAdminDrawer(route = 'menu') {
   if (!state.me?.user?.is_admin) return;
+  document.body.classList.add('no-scroll');
+  document.querySelector('#open-admin')?.classList.add('active');
   document.querySelector('#admin-drawer').classList.add('open');
   document.querySelector('#admin-drawer').setAttribute('aria-hidden', 'false');
   document.querySelector('#admin-backdrop').hidden = false;
@@ -1140,6 +1193,8 @@ function openAdminDrawer(route = 'menu') {
 }
 
 function closeAdminDrawer() {
+  document.body.classList.remove('no-scroll');
+  document.querySelector('#open-admin')?.classList.remove('active');
   document.querySelector('#admin-drawer').classList.remove('open');
   document.querySelector('#admin-drawer').setAttribute('aria-hidden', 'true');
   document.querySelector('#admin-backdrop').hidden = true;
@@ -1277,7 +1332,7 @@ function escapeAttr(value) {
   return escapeHtml(value).replaceAll('`', '&#096;');
 }
 
-document.querySelectorAll('.tab').forEach((button) => button.addEventListener('click', () => switchTab(button.dataset.tab)));
+document.querySelectorAll('.tab[data-tab]').forEach((button) => button.addEventListener('click', () => switchTab(button.dataset.tab)));
 document.querySelector('#toggle-ticket').addEventListener('click', () => {
   state.ticketExpanded = !state.ticketExpanded;
   renderTicket();
@@ -1292,6 +1347,10 @@ document.querySelector('#stake').addEventListener('input', (event) => {
   renderTicket();
 });
 document.querySelector('#place-bet').addEventListener('click', () => submitBet().catch((error) => status(error.message)));
+document.querySelector('#notice-close').addEventListener('click', closeNotice);
+document.querySelector('#notice-modal').addEventListener('click', (event) => {
+  if (event.target.id === 'notice-modal') closeNotice();
+});
 document.querySelector('#open-profile').addEventListener('click', openProfileCard);
 document.querySelector('#close-profile').addEventListener('click', closeProfileCard);
 document.querySelector('#profile-modal').addEventListener('click', (event) => {
