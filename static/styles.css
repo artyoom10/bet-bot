@@ -510,6 +510,16 @@ h3 { margin: 0; font-size: 15px; }
 }
 .debug-box { margin-top: 10px; padding: 10px; }
 .debug-box summary { cursor: pointer; color: var(--accent-2); font-weight: 800; }
+.copy-debug {
+  min-height: 38px;
+  margin-top: 10px;
+  border: 1px solid rgba(47, 128, 237, .2);
+  border-radius: 12px;
+  padding: 8px 11px;
+  color: var(--accent-2);
+  background: var(--surface-2);
+  font-weight: 850;
+}
 .debug-box pre {
   max-height: 360px;
   overflow: auto;

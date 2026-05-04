@@ -13,6 +13,8 @@ const state = {
   aliases: null,
   teamAliasRows: [],
   manualData: { sports: [], teams: [], events: [] },
+  debugReports: {},
+  debugReportSeq: 0,
   manualStep: 1,
   editingManualEventId: null,
   selectedEventId: null,
@@ -465,7 +467,7 @@ function renderTicket() {
     <article class="ticket-item">
       <div>
         <strong>${escapeHtml(item.event.home_team.name)} — ${escapeHtml(item.event.away_team.name)}</strong>
-        <p>${teamLogo(item.outcome.selection_key === 'away_win' ? item.event.away_team : item.event.home_team)} ${escapeHtml(item.market_title || marketTitles[item.market_key] || item.market_key)} · ${escapeHtml(item.outcome.name)}</p>
+        <p>${ticketSelectionPrefix(item)} ${escapeHtml(item.market_title || marketTitles[item.market_key] || item.market_key)} · ${escapeHtml(item.outcome.name)}</p>
       </div>
       <strong>${Number(item.outcome.price).toFixed(2)}</strong>
       <button type="button" data-remove-selection="${index}">×</button>
@@ -485,6 +487,12 @@ function renderTicket() {
       renderTicket();
     });
   });
+}
+
+function ticketSelectionPrefix(item) {
+  if (item.outcome.selection_key === 'home_win') return teamLogo(item.event.home_team);
+  if (item.outcome.selection_key === 'away_win') return teamLogo(item.event.away_team);
+  return '';
 }
 
 function clearTicket() {
@@ -634,12 +642,19 @@ function renderDashboard(data) {
 function renderSyncDebug(payload, selector) {
   const root = document.querySelector(selector);
   if (!root) return;
+  const id = `debug-${++state.debugReportSeq}`;
+  const json = JSON.stringify(payload, null, 2);
+  state.debugReports[id] = json;
   root.insertAdjacentHTML('beforeend', `
     <details class="debug-box" open>
       <summary>Подробный debug ответа</summary>
-      <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+      <button class="copy-debug" type="button" data-copy-debug="${id}">Скопировать debug</button>
+      <pre>${escapeHtml(json)}</pre>
     </details>
   `);
+  root.querySelectorAll('[data-copy-debug]').forEach((button) => {
+    button.addEventListener('click', () => copyDebugReport(button.dataset.copyDebug));
+  });
 }
 
 function renderActionError(error, selector) {
@@ -649,6 +664,30 @@ function renderActionError(error, selector) {
     data: error.data || null,
     responseText: error.responseText || null,
   }, selector);
+}
+
+async function copyDebugReport(id) {
+  const text = state.debugReports[id];
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    notify('Debug-отчёт скопирован', 'success');
+  } catch (error) {
+    fallbackCopy(text);
+    notify('Debug-отчёт скопирован', 'success');
+  }
+}
+
+function fallbackCopy(text) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
 }
 
 function renderApiUsage(usage) {

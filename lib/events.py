@@ -18,9 +18,12 @@ SELECTION_LABELS = {
 
 MARKET_TITLES = {
     "h2h": "Исход матча",
+    "h2h_lay": "Против исхода",
     "double_chance": "Двойной шанс",
     "totals": "Тотал",
     "spreads": "Фора",
+    "outrights": "Победитель турнира",
+    "outrights_lay": "Против победителя турнира",
     "video_review": "Видеопросмотр",
     "player_goal": "Гол игрока",
     "player_assist": "Передача игрока",
@@ -181,7 +184,7 @@ def format_markets(rows: list[dict[str, Any]], bookmakers: dict[str, dict[str, A
         if row["market_key"] not in market_keys:
             market_keys.append(row["market_key"])
 
-    market_order = {"h2h": 0, "double_chance": 1, "totals": 2, "spreads": 3, "video_review": 4, "player_goal": 5, "player_assist": 6}
+    market_order = {"h2h": 0, "h2h_lay": 1, "double_chance": 2, "totals": 3, "spreads": 4, "outrights": 5, "outrights_lay": 6, "video_review": 7, "player_goal": 8, "player_assist": 9}
     for market_key in sorted(market_keys, key=lambda key: market_order.get(key, 99)):
         market_rows = choose_market_odds(rows, market_key)
         if not market_rows:
@@ -253,4 +256,6 @@ def format_outcome(row: dict[str, Any]) -> dict[str, Any]:
 def market_title(market_key: str, sport_key: str | None = None) -> str:
     if market_key == "h2h" and sport_key and sport_key.startswith("icehockey_"):
         return "Итоговая победа"
+    if market_key == "h2h_lay" and sport_key and sport_key.startswith("icehockey_"):
+        return "Против итоговой победы"
     return MARKET_TITLES.get(market_key, market_key)

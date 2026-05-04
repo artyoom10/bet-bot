@@ -13,7 +13,6 @@ from lib.users import first
 
 
 SYNC_STALE_AFTER_MINUTES = 3
-SUPPORTED_MARKETS = {"h2h", "spreads", "totals", "double_chance"}
 
 
 SPORT_TITLES = {
@@ -241,8 +240,6 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
             h2h_names: dict[str, str] = {}
             for market in bookmaker.get("markets", []):
                 market_key = market.get("key")
-                if market_key not in SUPPORTED_MARKETS:
-                    continue
                 market_keys_seen.add(market_key)
                 for outcome in market.get("outcomes", []):
                     odd_payload = odd_payload_for_outcome(
@@ -415,6 +412,11 @@ def odd_payload_for_outcome(
             return None
         selection_name_ru = double_chance_name(selection_key)
 
+    else:
+        selection_key = generic_selection_key(market_key, outcome)
+        selection_name_ru = generic_selection_name(outcome)
+        selection_name_raw = selection_name_ru
+
     if not selection_key:
         return None
 
@@ -488,6 +490,37 @@ def double_chance_key(outcome_name: str, home_raw: str, away_raw: str) -> str | 
 
 def double_chance_name(selection_key: str) -> str:
     return {"home_or_draw": "1X", "home_or_away": "12", "draw_or_away": "X2"}.get(selection_key, selection_key)
+
+
+def generic_selection_key(market_key: str, outcome: dict[str, Any]) -> str:
+    parts = [
+        str(outcome.get("name") or "selection"),
+        str(outcome.get("description") or ""),
+        str(outcome.get("point") if outcome.get("point") is not None else ""),
+    ]
+    raw = "_".join(part for part in parts if part).lower()
+    clean = []
+    for char in raw:
+        if char.isalnum():
+            clean.append(char)
+        elif char in {".", ",", "-"}:
+            clean.append(char.replace(".", "p").replace(",", "p").replace("-", "m"))
+        else:
+            clean.append("_")
+    key = "_".join("".join(clean).split("_"))
+    return f"{market_key}_{key[:80]}" if key else f"{market_key}_selection"
+
+
+def generic_selection_name(outcome: dict[str, Any]) -> str:
+    name = str(outcome.get("name") or "Исход")
+    description = str(outcome.get("description") or "").strip()
+    point = outcome.get("point")
+    chunks = [name]
+    if description:
+        chunks.append(description)
+    if point is not None:
+        chunks.append(format_signed_line(float(point)))
+    return " · ".join(chunks)
 
 
 def line_key(value: float) -> str:
