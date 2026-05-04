@@ -9,6 +9,7 @@ from lib.errors import AppError
 
 
 BASE_URL = "https://api.the-odds-api.com/v4"
+ODDS_MARKETS = ("h2h", "spreads", "totals")
 
 
 def fetch_odds_for_sport(sport_key: str) -> dict[str, Any]:
@@ -19,11 +20,11 @@ def fetch_odds_for_sport(sport_key: str) -> dict[str, Any]:
     params = {
         "apiKey": api_key,
         "regions": "eu",
-        "markets": "h2h",
+        "markets": ",".join(ODDS_MARKETS),
         "oddsFormat": "decimal",
         "dateFormat": "iso",
     }
-    response = requests.get(f"{BASE_URL}/sports/{sport_key}/odds", params=params, timeout=30)
+    response = requests.get(f"{BASE_URL}/sports/{sport_key}/odds", params=params, timeout=20)
     if response.status_code >= 400:
         raise AppError("odds_api_error", f"Odds API returned {response.status_code}: {response.text[:300]}", 502)
 

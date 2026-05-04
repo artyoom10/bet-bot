@@ -235,6 +235,14 @@ def selection_result_status(selection: dict[str, Any], winner: str, home_score: 
     if market_key == "h2h":
         return "won" if selection_key == winner else "lost"
 
+    if market_key == "double_chance":
+        wins = {
+            "home_or_draw": {"home_win", "draw"},
+            "home_or_away": {"home_win", "away_win"},
+            "draw_or_away": {"draw", "away_win"},
+        }
+        return "won" if winner in wins.get(selection_key, set()) else "lost"
+
     if market_key == "totals":
         line = selection_line(selection_key)
         if line is None:

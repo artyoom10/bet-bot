@@ -11,10 +11,14 @@ SELECTION_LABELS = {
     "home_win": "П1",
     "draw": "X",
     "away_win": "П2",
+    "home_or_draw": "1X",
+    "home_or_away": "12",
+    "draw_or_away": "X2",
 }
 
 MARKET_TITLES = {
     "h2h": "Исход матча",
+    "double_chance": "Двойной шанс",
     "totals": "Тотал",
     "spreads": "Фора",
     "video_review": "Видеопросмотр",
@@ -26,6 +30,7 @@ DEFAULT_SPORT_TITLES = {
     "soccer_russia_premier_league": "Российская Премьер-Лига",
     "soccer_spain_la_liga": "Ла Лига",
     "soccer_uefa_champs_league": "Лига чемпионов",
+    "icehockey_nhl": "НХЛ",
 }
 
 
@@ -91,7 +96,6 @@ def get_events_for_app(db: SupabaseRestClient, sport_key: str | None = None) -> 
         away_team = teams.get(event.get("away_team_id"))
         bookmaker_key = event_odds[0]["bookmaker_key"]
         bookmaker = bookmakers.get(bookmaker_key, {})
-        markets = format_markets(event_rows, bookmakers)
 
         formatted.append(
             {
@@ -105,10 +109,10 @@ def get_events_for_app(db: SupabaseRestClient, sport_key: str | None = None) -> 
                     "bookmaker_key": bookmaker_key,
                     "bookmaker_title": bookmaker.get("title") or bookmaker_key,
                     "market_key": event_odds[0]["market_key"],
-                    "title": MARKET_TITLES.get(event_odds[0]["market_key"], event_odds[0]["market_key"]),
+                    "title": market_title(event_odds[0]["market_key"], event["sport_key"]),
                     "outcomes": [format_outcome(row) for row in sort_outcomes(event_odds)],
                 },
-                "markets": markets,
+                "markets": format_markets(event_rows, bookmakers, event["sport_key"]),
             }
         )
 
@@ -167,14 +171,14 @@ def choose_market_odds(rows: list[dict[str, Any]], market_key: str) -> list[dict
     return choose_bookmaker_odds([row for row in rows if row["market_key"] == market_key])
 
 
-def format_markets(rows: list[dict[str, Any]], bookmakers: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def format_markets(rows: list[dict[str, Any]], bookmakers: dict[str, dict[str, Any]], sport_key: str | None = None) -> list[dict[str, Any]]:
     markets = []
     market_keys = []
     for row in rows:
         if row["market_key"] not in market_keys:
             market_keys.append(row["market_key"])
 
-    market_order = {"h2h": 0, "totals": 1, "spreads": 2, "video_review": 3, "player_goal": 4, "player_assist": 5}
+    market_order = {"h2h": 0, "double_chance": 1, "totals": 2, "spreads": 3, "video_review": 4, "player_goal": 5, "player_assist": 6}
     for market_key in sorted(market_keys, key=lambda key: market_order.get(key, 99)):
         market_rows = choose_market_odds(rows, market_key)
         if not market_rows:
@@ -184,7 +188,7 @@ def format_markets(rows: list[dict[str, Any]], bookmakers: dict[str, dict[str, A
         markets.append(
             {
                 "market_key": market_key,
-                "title": MARKET_TITLES.get(market_key, market_key),
+                "title": market_title(market_key, sport_key),
                 "bookmaker_key": bookmaker_key,
                 "bookmaker_title": bookmaker.get("title") or bookmaker_key,
                 "outcomes": [format_outcome(row) for row in sort_outcomes(market_rows)],
@@ -198,6 +202,9 @@ def sort_outcomes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "home_win": 0,
         "draw": 1,
         "away_win": 2,
+        "home_or_draw": 3,
+        "home_or_away": 4,
+        "draw_or_away": 5,
     }
 
     def sort_key(row: dict[str, Any]) -> int:
@@ -205,13 +212,13 @@ def sort_outcomes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if selection_key in order:
             return order[selection_key]
         if selection_key.startswith("total_over"):
-            return 3
+            return 10
         if selection_key.startswith("total_under"):
-            return 4
+            return 11
         if selection_key.startswith("handicap_home"):
-            return 5
+            return 20
         if selection_key.startswith("handicap_away"):
-            return 6
+            return 21
         if selection_key.endswith("_yes"):
             return 7
         if selection_key.endswith("_no"):
@@ -238,3 +245,9 @@ def format_outcome(row: dict[str, Any]) -> dict[str, Any]:
         "name": name,
         "price": float(row["price"]),
     }
+
+
+def market_title(market_key: str, sport_key: str | None = None) -> str:
+    if market_key == "h2h" and sport_key and sport_key.startswith("icehockey_"):
+        return "Итоговая победа"
+    return MARKET_TITLES.get(market_key, market_key)

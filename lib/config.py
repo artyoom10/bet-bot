@@ -5,6 +5,7 @@ SPORT_KEYS = [
     "soccer_russia_premier_league",
     "soccer_spain_la_liga",
     "soccer_uefa_champs_league",
+    "icehockey_nhl",
 ]
 
 

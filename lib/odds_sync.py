@@ -12,6 +12,10 @@ from lib.team_mapping import find_team_by_raw_name, resolve_selection_name_ru
 from lib.users import first
 
 
+SYNC_STALE_AFTER_MINUTES = 3
+SUPPORTED_MARKETS = {"h2h", "spreads", "totals", "double_chance"}
+
+
 SPORT_TITLES = {
     "soccer_russia_premier_league": {
         "title_en": "Premier League - Russia",
@@ -28,6 +32,11 @@ SPORT_TITLES = {
         "title_ru": "Лига чемпионов",
         "group_name": "Soccer",
     },
+    "icehockey_nhl": {
+        "title_en": "NHL",
+        "title_ru": "НХЛ",
+        "group_name": "Ice Hockey",
+    },
 }
 
 
@@ -39,7 +48,7 @@ def run_odds_sync(
     sport_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     mark_stale_syncs(db)
-    started_after = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    started_after = (datetime.now(timezone.utc) - timedelta(minutes=SYNC_STALE_AFTER_MINUTES)).isoformat()
     active = first(
         db.select(
             "sync_runs",
@@ -178,6 +187,8 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
         "bookmakers_count": 0,
         "snapshots_count": 0,
         "events_without_h2h": 0,
+        "markets_requested": ["h2h", "spreads", "totals"],
+        "double_chance_derived_count": 0,
         "quota_remaining": api_result.get("quota_remaining"),
         "quota_used": api_result.get("quota_used"),
         "quota_last": api_result.get("quota_last"),
@@ -225,12 +236,27 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
             )
             counts["bookmakers_count"] += 1
 
+            market_keys_seen = set()
+            h2h_prices: dict[str, float] = {}
+            h2h_names: dict[str, str] = {}
             for market in bookmaker.get("markets", []):
-                if market.get("key") != "h2h":
+                market_key = market.get("key")
+                if market_key not in SUPPORTED_MARKETS:
                     continue
+                market_keys_seen.add(market_key)
                 for outcome in market.get("outcomes", []):
-                    selection_key = selection_key_for_outcome(outcome["name"], home_raw, away_raw)
-                    if not selection_key:
+                    odd_payload = odd_payload_for_outcome(
+                        event["id"],
+                        bookmaker_key,
+                        market_key,
+                        outcome,
+                        home_raw,
+                        away_raw,
+                        home_team,
+                        away_team,
+                        now,
+                    )
+                    if not odd_payload:
                         continue
 
                     old = first(
@@ -240,46 +266,41 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
                                 "select": "*",
                                 "event_id": f"eq.{event['id']}",
                                 "bookmaker_key": f"eq.{bookmaker_key}",
-                                "market_key": "eq.h2h",
-                                "selection_key": f"eq.{selection_key}",
+                                "market_key": f"eq.{odd_payload['market_key']}",
+                                "selection_key": f"eq.{odd_payload['selection_key']}",
                                 "limit": "1",
                             },
                         )
                     )
-                    selection_name_ru = resolve_selection_name_ru(selection_key, outcome["name"], home_team, away_team)
-                    price = float(outcome["price"])
-                    db.upsert(
-                        "odds_current",
-                        {
-                            "event_id": event["id"],
-                            "bookmaker_key": bookmaker_key,
-                            "market_key": "h2h",
-                            "selection_key": selection_key,
-                            "selection_name_raw": outcome["name"],
-                            "selection_name_ru": selection_name_ru,
-                            "price": price,
-                            "api_last_update": market.get("last_update") or bookmaker.get("last_update"),
-                            "updated_at": now,
-                        },
-                        "event_id,bookmaker_key,market_key,selection_key",
-                    )
+                    odd_payload["api_last_update"] = market.get("last_update") or bookmaker.get("last_update")
+                    db.upsert("odds_current", odd_payload, "event_id,bookmaker_key,market_key,selection_key")
                     counts["odds_count"] += 1
-                    event_h2h_count += 1
+                    if odd_payload["market_key"] == "h2h":
+                        event_h2h_count += 1
+                        h2h_prices[odd_payload["selection_key"]] = float(odd_payload["price"])
+                        h2h_names[odd_payload["selection_key"]] = odd_payload["selection_name_ru"]
 
-                    if not old or float(old["price"]) != price:
+                    if not old or float(old["price"]) != float(odd_payload["price"]):
                         db.insert(
                             "odds_snapshots",
                             {
                                 "event_id": event["id"],
                                 "bookmaker_key": bookmaker_key,
-                                "market_key": "h2h",
-                                "selection_key": selection_key,
-                                "selection_name_raw": outcome["name"],
-                                "price": price,
-                                "api_last_update": market.get("last_update") or bookmaker.get("last_update"),
+                                "market_key": odd_payload["market_key"],
+                                "selection_key": odd_payload["selection_key"],
+                                "selection_name_raw": odd_payload["selection_name_raw"],
+                                "price": odd_payload["price"],
+                                "api_last_update": odd_payload["api_last_update"],
                             },
                         )
                         counts["snapshots_count"] += 1
+
+            if sport_key.startswith("soccer_") and "double_chance" not in market_keys_seen:
+                derived_rows = derived_double_chance_rows(event["id"], bookmaker_key, h2h_prices, h2h_names, now)
+                for row in derived_rows:
+                    db.upsert("odds_current", row, "event_id,bookmaker_key,market_key,selection_key")
+                    counts["odds_count"] += 1
+                    counts["double_chance_derived_count"] += 1
 
         if event_h2h_count == 0:
             counts["events_without_h2h"] += 1
@@ -308,7 +329,7 @@ def ensure_sports_seed(db: SupabaseRestClient, sport_keys: list[str]) -> None:
 
 
 def mark_stale_syncs(db: SupabaseRestClient) -> None:
-    stale_before = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    stale_before = (datetime.now(timezone.utc) - timedelta(minutes=SYNC_STALE_AFTER_MINUTES)).isoformat()
     stale = db.select(
         "sync_runs",
         {
@@ -323,11 +344,164 @@ def mark_stale_syncs(db: SupabaseRestClient) -> None:
             "sync_runs",
             {
                 "status": "error",
-                "error_message": "Sync did not finish within 10 minutes",
+                "error_message": f"Sync did not finish within {SYNC_STALE_AFTER_MINUTES} minutes",
                 "finished_at": datetime.now(timezone.utc).isoformat(),
             },
             {"id": f"eq.{row['id']}"},
         )
+
+
+def odd_payload_for_outcome(
+    event_id: str,
+    bookmaker_key: str,
+    market_key: str,
+    outcome: dict[str, Any],
+    home_raw: str,
+    away_raw: str,
+    home_team: dict[str, Any] | None,
+    away_team: dict[str, Any] | None,
+    now: str,
+) -> dict[str, Any] | None:
+    outcome_name = str(outcome.get("name") or "")
+    price = float(outcome.get("price") or 0)
+    if price <= 1:
+        return None
+
+    selection_key = ""
+    selection_name_ru = ""
+    selection_name_raw = outcome_name
+
+    if market_key == "h2h":
+        selection_key = selection_key_for_outcome(outcome_name, home_raw, away_raw)
+        if not selection_key:
+            return None
+        selection_name_ru = resolve_selection_name_ru(selection_key, outcome_name, home_team, away_team)
+
+    elif market_key == "totals":
+        point = outcome.get("point")
+        if point is None:
+            return None
+        line = float(point)
+        line_label = format_line(line)
+        if outcome_name.lower() == "over":
+            selection_key = f"total_over_{line_key(line)}"
+            selection_name_ru = f"ТБ {line_label}"
+        elif outcome_name.lower() == "under":
+            selection_key = f"total_under_{line_key(line)}"
+            selection_name_ru = f"ТМ {line_label}"
+        else:
+            return None
+        selection_name_raw = f"{outcome_name} {line_label}"
+
+    elif market_key == "spreads":
+        point = outcome.get("point")
+        if point is None:
+            return None
+        line = float(point)
+        line_label = format_signed_line(line)
+        if outcome_name == home_raw:
+            selection_key = f"handicap_home_{line_key(line)}"
+            selection_name_ru = f"Ф1 ({line_label})"
+        elif outcome_name == away_raw:
+            selection_key = f"handicap_away_{line_key(line)}"
+            selection_name_ru = f"Ф2 ({line_label})"
+        else:
+            return None
+        selection_name_raw = f"{outcome_name} {line_label}"
+
+    elif market_key == "double_chance":
+        selection_key = double_chance_key(outcome_name, home_raw, away_raw)
+        if not selection_key:
+            return None
+        selection_name_ru = double_chance_name(selection_key)
+
+    if not selection_key:
+        return None
+
+    return {
+        "event_id": event_id,
+        "bookmaker_key": bookmaker_key,
+        "market_key": market_key,
+        "selection_key": selection_key,
+        "selection_name_raw": selection_name_raw,
+        "selection_name_ru": selection_name_ru,
+        "price": price,
+        "api_last_update": now,
+        "updated_at": now,
+    }
+
+
+def derived_double_chance_rows(
+    event_id: str,
+    bookmaker_key: str,
+    h2h_prices: dict[str, float],
+    h2h_names: dict[str, str],
+    now: str,
+) -> list[dict[str, Any]]:
+    required = ("home_win", "draw", "away_win")
+    if any(key not in h2h_prices for key in required):
+        return []
+
+    pairs = [
+        ("home_or_draw", ("home_win", "draw"), "1X"),
+        ("home_or_away", ("home_win", "away_win"), "12"),
+        ("draw_or_away", ("draw", "away_win"), "X2"),
+    ]
+    rows = []
+    for selection_key, pair, label in pairs:
+        implied = sum(1 / h2h_prices[key] for key in pair if h2h_prices[key] > 1)
+        if implied <= 0:
+            continue
+        price = round(max(1.01, 1 / implied), 2)
+        raw_name = " or ".join(h2h_names.get(key, key) for key in pair)
+        rows.append(
+            {
+                "event_id": event_id,
+                "bookmaker_key": bookmaker_key,
+                "market_key": "double_chance",
+                "selection_key": selection_key,
+                "selection_name_raw": raw_name,
+                "selection_name_ru": label,
+                "price": price,
+                "api_last_update": now,
+                "updated_at": now,
+            }
+        )
+    return rows
+
+
+def double_chance_key(outcome_name: str, home_raw: str, away_raw: str) -> str | None:
+    value = outcome_name.lower()
+    home = home_raw.lower()
+    away = away_raw.lower()
+    has_home = home in value or "home" in value
+    has_away = away in value or "away" in value
+    has_draw = "draw" in value or "tie" in value
+    if has_home and has_draw:
+        return "home_or_draw"
+    if has_home and has_away:
+        return "home_or_away"
+    if has_draw and has_away:
+        return "draw_or_away"
+    return None
+
+
+def double_chance_name(selection_key: str) -> str:
+    return {"home_or_draw": "1X", "home_or_away": "12", "draw_or_away": "X2"}.get(selection_key, selection_key)
+
+
+def line_key(value: float) -> str:
+    sign = "m" if value < 0 else "p"
+    return f"{sign}{abs(value):g}".replace(".", "p")
+
+
+def format_line(value: float) -> str:
+    return f"{value:g}".replace(".", ",")
+
+
+def format_signed_line(value: float) -> str:
+    prefix = "+" if value > 0 else ""
+    return f"{prefix}{format_line(value)}"
 
 
 def refresh_odds_usage(db: SupabaseRestClient, admin_user: dict[str, Any]) -> dict[str, Any]:

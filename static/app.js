@@ -22,14 +22,23 @@ const state = {
   activeTab: 'events',
 };
 
-const labels = { home_win: 'П1', draw: 'X', away_win: 'П2' };
+const labels = { home_win: 'П1', draw: 'X', away_win: 'П2', home_or_draw: '1X', home_or_away: '12', draw_or_away: 'X2' };
 const statusLabels = { pending: 'ожидает', won: 'выиграла', lost: 'проиграла', refund: 'возврат', cancelled: 'отменена' };
 const eventStatusLabels = { upcoming: 'ожидает', finished: 'завершён', cancelled: 'отменён' };
 const clientStatusLabels = { new: 'новый', active: 'активный', vip: 'VIP', test: 'тестовый', restricted: 'ограничен', suspended: 'приостановлен' };
-const marketTitles = { h2h: 'Исход матча', totals: 'Тотал', spreads: 'Фора', video_review: 'Видеопросмотр', player_goal: 'Гол игрока', player_assist: 'Передача игрока' };
-const defaultSportKeys = ['soccer_russia_premier_league', 'soccer_spain_la_liga', 'soccer_uefa_champs_league'];
+const marketTitles = { h2h: 'Исход матча', double_chance: 'Двойной шанс', totals: 'Тотал', spreads: 'Фора', video_review: 'Видеопросмотр', player_goal: 'Гол игрока', player_assist: 'Передача игрока' };
+const defaultSportKeys = ['soccer_russia_premier_league', 'soccer_spain_la_liga', 'soccer_uefa_champs_league', 'icehockey_nhl'];
+const defaultSportTitles = {
+  soccer_russia_premier_league: 'Российская Премьер-Лига',
+  soccer_spain_la_liga: 'Ла Лига',
+  soccer_uefa_champs_league: 'Лига чемпионов',
+  icehockey_nhl: 'НХЛ',
+};
 const minStake = 30;
 const stakePresets = [30, 50, 100, 200, 500];
+const fetchTimeoutMs = 45000;
+const minWelcomeMs = 4000;
+let welcomeStartedAt = Date.now();
 const welcomeMessages = [
   'Собираем лучшие матчи...',
   'Сейчас всё красиво откроется...',
@@ -50,7 +59,15 @@ const adminTitles = {
 };
 
 function money(value) {
-  return `DEMO ${Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}`;
+  return `${moneyValue(value)} ✦`;
+}
+
+function moneyHtml(value) {
+  return `${moneyValue(value)} <span class="currency-star">✦</span>`;
+}
+
+function moneyValue(value) {
+  return Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 }
 
 function status(message) {
@@ -98,6 +115,7 @@ function showBlockedScreen(reason) {
 }
 
 function prepareWelcome() {
+  welcomeStartedAt = Date.now();
   document.querySelector('#welcome-greeting').textContent = `${moscowGreeting()},`;
   document.querySelector('#welcome-name').textContent = localStorage.getItem('betbot_profile_name') || telegramFallbackName() || 'Игрок';
   updateWelcomeMessage(true);
@@ -112,12 +130,13 @@ function finishWelcome(name) {
   }
   window.clearInterval(welcomeMessageTimer);
   welcomeMessageTimer = null;
+  const delay = Math.max(0, minWelcomeMs - (Date.now() - welcomeStartedAt));
   window.setTimeout(() => {
     document.querySelector('#welcome-screen').classList.add('hidden');
     window.setTimeout(() => {
       document.querySelector('#welcome-screen').hidden = true;
     }, 360);
-  }, 650);
+  }, delay);
 }
 
 function updateWelcomeMessage(initial = false) {
@@ -149,29 +168,41 @@ function moscowGreeting() {
 }
 
 async function apiFetch(path, options = {}) {
+  const { timeoutMs = fetchTimeoutMs, headers: optionHeaders = {}, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   const headers = {
     'Content-Type': 'application/json',
     'X-Telegram-Init-Data': tg?.initData || '',
-    ...(options.headers || {}),
+    ...optionHeaders,
   };
-  const response = await fetch(path, { ...options, headers });
-  const text = await response.text();
-  let data = {};
   try {
-    data = text ? JSON.parse(text) : {};
-  } catch (parseError) {
-    const error = new Error(`HTTP ${response.status}: сервер вернул не JSON: ${text.slice(0, 1200)}`);
-    error.responseText = text;
-    error.status = response.status;
+    const response = await fetch(path, { ...fetchOptions, headers, signal: controller.signal });
+    const text = await response.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (parseError) {
+      const error = new Error(`HTTP ${response.status}: сервер вернул не JSON: ${text.slice(0, 1200)}`);
+      error.responseText = text;
+      error.status = response.status;
+      throw error;
+    }
+    if (!response.ok || data.ok === false) {
+      const error = new Error(data.message || data.error || `HTTP ${response.status}`);
+      error.data = data;
+      error.status = response.status;
+      throw error;
+    }
+    return data;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('Запрос выполнялся слишком долго. Проверьте последние sync runs и попробуйте ещё раз.');
+    }
     throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  if (!response.ok || data.ok === false) {
-    const error = new Error(data.message || data.error || `HTTP ${response.status}`);
-    error.data = data;
-    error.status = response.status;
-    throw error;
-  }
-  return data;
 }
 
 async function init() {
@@ -191,7 +222,7 @@ async function loadMe() {
   state.me = data;
   const profileName = resolveProfileName(data);
   document.querySelector('#profile-name').textContent = profileName;
-  document.querySelector('#balance-value').textContent = money(data.wallet.balance);
+  document.querySelector('#balance-value').innerHTML = moneyHtml(data.wallet.balance);
   renderProfileView();
   document.querySelectorAll('.admin-only').forEach((item) => {
     item.hidden = !data.user.is_admin;
@@ -422,13 +453,13 @@ function renderTicket() {
   document.querySelector('#ticket-form').hidden = !state.ticketExpanded;
   document.querySelector('#ticket-type').textContent = type;
   document.querySelector('#ticket-odds').textContent = odds.toFixed(2);
-  document.querySelector('#ticket-win').textContent = money(state.stake * odds);
+  document.querySelector('#ticket-win').innerHTML = moneyHtml(state.stake * odds);
   document.querySelector('#stake').classList.toggle('invalid', !validation.ok);
   document.querySelector('#place-bet').disabled = !validation.ok;
   document.querySelector('#stake-error').hidden = validation.ok;
   document.querySelector('#stake-error').textContent = validation.message;
   document.querySelector('#stake-presets').innerHTML = stakePresets.map((amount) => `
-    <button type="button" class="${Number(state.stake) === amount ? 'active' : ''}" data-stake-preset="${amount}">${money(amount).replace('DEMO ', '')}</button>
+    <button type="button" class="${Number(state.stake) === amount ? 'active' : ''}" data-stake-preset="${amount}">${moneyHtml(amount)}</button>
   `).join('');
   document.querySelector('#ticket-list').innerHTML = state.selections.map((item, index) => `
     <article class="ticket-item">
@@ -485,7 +516,7 @@ async function submitBet() {
       }),
     });
     state.me.wallet = result.wallet;
-    document.querySelector('#balance-value').textContent = money(result.wallet.balance);
+    document.querySelector('#balance-value').innerHTML = moneyHtml(result.wallet.balance);
     renderProfileView();
     notify('Ставка принята', 'success');
     tg?.HapticFeedback?.notificationOccurred('success');
@@ -541,15 +572,15 @@ function renderBetCard(bet) {
 
 function betMoneyLine(bet) {
   if (bet.status === 'won') {
-    return `<span>${money(bet.amount)}</span><b class="arrow">→</b><strong class="win">${money(bet.payout ?? bet.possible_win)}</strong>`;
+    return `<span>${moneyHtml(bet.amount)}</span><b class="arrow">→</b><strong class="win">${moneyHtml(bet.payout ?? bet.possible_win)}</strong>`;
   }
   if (bet.status === 'lost') {
-    return `<strong class="loss">-${money(bet.amount)}</strong>`;
+    return `<strong class="loss">-${moneyHtml(bet.amount)}</strong>`;
   }
   if (bet.status === 'refund') {
-    return `<strong class="refund">${money(bet.payout ?? bet.amount)}</strong>`;
+    return `<strong class="refund">${moneyHtml(bet.payout ?? bet.amount)}</strong>`;
   }
-  return `<span>${money(bet.amount)}</span><b class="arrow">→</b><strong>${money(bet.possible_win)}</strong>`;
+  return `<span>${moneyHtml(bet.amount)}</span><b class="arrow">→</b><strong>${moneyHtml(bet.possible_win)}</strong>`;
 }
 
 function openProfileCard() {
@@ -564,13 +595,13 @@ function renderProfileView() {
     <div class="stat"><span>Telegram ID</span><strong>${escapeHtml(user.tg_id)}</strong></div>
     <div class="stat"><span>Username</span><strong>${escapeHtml(user.username || 'не указан')}</strong></div>
     <div class="stat"><span>Статус</span><strong>${escapeHtml(clientStatusLabels[user.client_status] || user.client_status || 'не указан')}</strong></div>
-    <div class="stat"><span>Баланс</span><strong>${money(wallet.balance)}</strong></div>
+    <div class="stat"><span>Баланс</span><strong>${moneyHtml(wallet.balance)}</strong></div>
   `;
   document.querySelector('#profile-view-name').textContent = resolveProfileName(state.me);
-  document.querySelector('#profile-view-balance').textContent = money(wallet.balance);
+  document.querySelector('#profile-view-balance').innerHTML = moneyHtml(wallet.balance);
   document.querySelector('#profile-view-info').innerHTML = content;
   document.querySelector('#profile-card-name').textContent = resolveProfileName(state.me);
-  document.querySelector('#profile-card-balance').textContent = money(wallet.balance);
+  document.querySelector('#profile-card-balance').innerHTML = moneyHtml(wallet.balance);
   document.querySelector('#profile-card-info').innerHTML = content;
 }
 
@@ -644,6 +675,7 @@ async function syncOdds() {
       try {
         const result = await apiFetch('/api/admin/sync-odds', {
           method: 'POST',
+          timeoutMs: 45000,
           body: JSON.stringify({ sport_keys: [sportKey] }),
         });
         responses.push({ sport_key: sportKey, ok: true, result });
@@ -1290,12 +1322,12 @@ function groupBy(items, getKey) {
 
 function sportTitle(sportKey) {
   const sport = [...(state.aliases?.sports || []), ...(state.manualData?.sports || []), ...(state.sports || [])].find((item) => item.sport_key === sportKey);
-  return sport?.title_ru || sport?.title || sport?.title_en || sportKey;
+  return sport?.title_ru || sport?.title || sport?.title_en || defaultSportTitles[sportKey] || sportKey;
 }
 
 function syncSportKeys() {
   const keys = state.sports.map((sport) => sport.sport_key).filter((key) => key && !key.startsWith('manual_'));
-  return keys.length ? keys : defaultSportKeys;
+  return [...new Set([...defaultSportKeys, ...keys])];
 }
 
 function summarizeSettlementResponses(responses) {

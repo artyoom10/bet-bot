@@ -19,7 +19,7 @@ def place_bet(
     selections: list[dict[str, Any]],
 ) -> dict[str, Any]:
     if amount < MIN_BET_AMOUNT:
-        raise AppError("invalid_amount", f"Минимальная ставка DEMO {MIN_BET_AMOUNT}", 400)
+        raise AppError("invalid_amount", f"Минимальная ставка {MIN_BET_AMOUNT} ✦", 400)
     if not selections:
         raise AppError("empty_selections", "Select at least one outcome", 400)
     if len(selections) > MAX_SELECTIONS:
@@ -37,7 +37,7 @@ def place_bet(
 
     balance_before = float(wallet["balance"])
     if balance_before < amount:
-        raise AppError("insufficient_balance", "Not enough demo balance", 400)
+        raise AppError("insufficient_balance", "Недостаточный баланс", 400)
 
     snapshots = [validate_selection(db, selection) for selection in selections]
     total_odds = round(product(snapshot["price"] for snapshot in snapshots), 2)
