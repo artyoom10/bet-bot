@@ -136,7 +136,9 @@
           <p class="label">Управление</p>
           <h2 id="admin-title">Админка</h2>
         </div>
-        <button class="back-button admin-exit" id="close-admin" type="button">Линия</button>
+        <button class="plain-icon-button admin-exit" id="close-admin" type="button" aria-label="Вернуться к линии">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
       </header>
 
       <section class="admin-page active" id="admin-page-menu">
@@ -148,24 +150,28 @@
           <span class="admin-link-icon">02</span>
           <span><strong>Статистика API</strong><small>Credits, лимиты и состояние Odds API</small></span>
         </button>
-        <button class="admin-link" data-admin-link="users">
+        <button class="admin-link" data-admin-link="all-events">
           <span class="admin-link-icon">03</span>
+          <span><strong>Все события</strong><small>Список матчей и получение подробных рынков</small></span>
+        </button>
+        <button class="admin-link" data-admin-link="users">
+          <span class="admin-link-icon">04</span>
           <span><strong>Пользователи</strong><small>Баланс, статусы и блокировки</small></span>
         </button>
         <button class="admin-link" data-admin-link="all-bets">
-          <span class="admin-link-icon">04</span>
+          <span class="admin-link-icon">05</span>
           <span><strong>Все ставки</strong><small>Сортировка по времени, пользователю и сумме</small></span>
         </button>
         <button class="admin-link" data-admin-link="aliases">
-          <span class="admin-link-icon">05</span>
+          <span class="admin-link-icon">06</span>
           <span><strong>Алиасы и команды</strong><small>Русские названия, лого и группировка</small></span>
         </button>
         <button class="admin-link" data-admin-link="constructor">
-          <span class="admin-link-icon">06</span>
+          <span class="admin-link-icon">07</span>
           <span><strong>Конструктор событий</strong><small>Ручные матчи и рынки</small></span>
         </button>
         <button class="admin-link" data-admin-link="results">
-          <span class="admin-link-icon">07</span>
+          <span class="admin-link-icon">08</span>
           <span><strong>Расчёт ставок</strong><small>Результаты, ручной счёт и выплаты</small></span>
         </button>
       </section>
@@ -194,6 +200,14 @@
           <h2>Лимиты API</h2>
           <div id="api-usage" class="stack"></div>
         </article>
+      </section>
+
+      <section class="admin-page" id="admin-page-all-events">
+        <button class="back-button" data-admin-back>Назад</button>
+        <div class="admin-actions">
+          <button class="primary" id="reload-admin-events" type="button">Обновить список событий</button>
+        </div>
+        <div class="stack" id="admin-all-events"></div>
       </section>
 
       <section class="admin-page" id="admin-page-users">

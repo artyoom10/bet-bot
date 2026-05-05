@@ -69,6 +69,59 @@ def fetch_events_for_sport(sport_key: str) -> dict[str, Any]:
     }
 
 
+def fetch_event_markets(sport_key: str, event_id: str) -> dict[str, Any]:
+    api_key = env("ODDS_API_KEY")
+    if not api_key:
+        raise AppError("odds_api_not_configured", "ODDS_API_KEY is not configured", 500)
+
+    params = {
+        "apiKey": api_key,
+        "regions": odds_regions(),
+        "dateFormat": "iso",
+    }
+    response = requests.get(f"{BASE_URL}/sports/{sport_key}/events/{event_id}/markets", params=params, timeout=20)
+    if response.status_code >= 400:
+        raise AppError("odds_api_error", f"Odds API event markets returned {response.status_code}: {response.text[:300]}", 502)
+
+    return {
+        "data": response.json(),
+        "quota_remaining": header_int(response, "x-requests-remaining"),
+        "quota_used": header_int(response, "x-requests-used"),
+        "quota_last": header_int(response, "x-requests-last"),
+        "request_url": masked_url(response, api_key),
+        "regions": params["regions"],
+    }
+
+
+def fetch_event_odds(sport_key: str, event_id: str, markets: list[str]) -> dict[str, Any]:
+    api_key = env("ODDS_API_KEY")
+    if not api_key:
+        raise AppError("odds_api_not_configured", "ODDS_API_KEY is not configured", 500)
+    if not markets:
+        raise AppError("event_markets_empty", "No markets to request for event", 400)
+
+    params = {
+        "apiKey": api_key,
+        "regions": odds_regions(),
+        "markets": ",".join(markets),
+        "oddsFormat": "decimal",
+        "dateFormat": "iso",
+    }
+    response = requests.get(f"{BASE_URL}/sports/{sport_key}/events/{event_id}/odds", params=params, timeout=30)
+    if response.status_code >= 400:
+        raise AppError("odds_api_error", f"Odds API event odds returned {response.status_code}: {response.text[:300]}", 502)
+
+    return {
+        "data": response.json(),
+        "quota_remaining": header_int(response, "x-requests-remaining"),
+        "quota_used": header_int(response, "x-requests-used"),
+        "quota_last": header_int(response, "x-requests-last"),
+        "request_url": masked_url(response, api_key),
+        "regions": params["regions"],
+        "markets": params["markets"],
+    }
+
+
 def refresh_usage() -> dict[str, Any]:
     api_key = env("ODDS_API_KEY")
     if not api_key:

@@ -18,12 +18,11 @@ SELECTION_LABELS = {
 
 MARKET_TITLES = {
     "h2h": "Исход матча",
-    "h2h_lay": "Против исхода",
     "double_chance": "Двойной шанс",
     "totals": "Тотал",
+    "alternate_totals": "Альтернативный тотал",
     "spreads": "Фора",
-    "outrights": "Победитель турнира",
-    "outrights_lay": "Против победителя турнира",
+    "alternate_spreads": "Альтернативная фора",
     "video_review": "Видеопросмотр",
     "player_goal": "Гол игрока",
     "player_assist": "Передача игрока",
@@ -90,7 +89,7 @@ def get_events_for_app(db: SupabaseRestClient, sport_key: str | None = None) -> 
 
     formatted = []
     for event in events:
-        event_rows = odds_by_event.get(event["id"], [])
+        event_rows = [row for row in odds_by_event.get(event["id"], []) if not is_lay_market(row["market_key"])]
         event_odds = choose_market_odds(event_rows, "h2h") or choose_bookmaker_odds(event_rows)
         if not event_odds:
             continue
@@ -188,10 +187,12 @@ def format_markets(rows: list[dict[str, Any]], bookmakers: dict[str, dict[str, A
     markets = []
     market_keys = []
     for row in rows:
+        if is_lay_market(row["market_key"]):
+            continue
         if row["market_key"] not in market_keys:
             market_keys.append(row["market_key"])
 
-    market_order = {"h2h": 0, "h2h_lay": 1, "double_chance": 2, "totals": 3, "spreads": 4, "outrights": 5, "outrights_lay": 6, "video_review": 7, "player_goal": 8, "player_assist": 9}
+    market_order = {"h2h": 0, "double_chance": 2, "totals": 3, "alternate_totals": 4, "spreads": 5, "alternate_spreads": 6, "video_review": 7, "player_goal": 8, "player_assist": 9}
     for market_key in sorted(market_keys, key=lambda key: market_order.get(key, 99)):
         market_rows = choose_market_odds(rows, market_key)
         if not market_rows:
@@ -263,6 +264,8 @@ def format_outcome(row: dict[str, Any]) -> dict[str, Any]:
 def market_title(market_key: str, sport_key: str | None = None) -> str:
     if market_key == "h2h" and sport_key and sport_key.startswith("icehockey_"):
         return "Итоговая победа"
-    if market_key == "h2h_lay" and sport_key and sport_key.startswith("icehockey_"):
-        return "Против итоговой победы"
     return MARKET_TITLES.get(market_key, market_key)
+
+
+def is_lay_market(market_key: str) -> bool:
+    return market_key.endswith("_lay")

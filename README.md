@@ -44,6 +44,7 @@ This adds result fields, payout fields, express settlement status, logo support,
 - `POST /api/admin/users`
 - `PATCH /api/admin/users/:id`
 - `GET /api/admin/events`
+- `POST /api/admin/events/:id/fetch-markets`
 - `GET /api/admin/bets`
 - `DELETE /api/admin/manual-sports/:sport_key`
 - `GET /api/admin/aliases`

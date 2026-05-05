@@ -15,7 +15,7 @@ from lib.bets import get_user_bets, place_bet
 from lib.config import SPORT_KEYS, admin_tg_ids, app_name
 from lib.errors import AppError, error_response
 from lib.events import default_sports, get_events_for_app, get_sports_for_app
-from lib.odds_sync import refresh_odds_usage, run_odds_sync
+from lib.odds_sync import refresh_odds_usage, run_odds_sync, sync_event_markets
 from lib.settlement import get_settlement_runs, manual_result_and_settle, settle_pending_bets, sync_scores_and_settle
 from lib.supabase_client import get_db
 from lib.telegram_auth import get_verified_telegram_user
@@ -261,8 +261,7 @@ def api_admin_users():
 def api_admin_events():
     db = get_db()
     require_admin(request, db)
-    events = db.select("events", {"select": "*", "order": "commence_time.desc", "limit": "100"})
-    return jsonify(events)
+    return jsonify(admin_events_payload(db))
 
 
 @app.get("/api/admin/manual-events")
@@ -395,6 +394,17 @@ def api_admin_manual_result(event_id: str):
         away_score=away_score,
     )
     return jsonify({"ok": True, "result": result})
+
+
+@app.post("/api/admin/events/<event_id>/fetch-markets")
+def api_admin_fetch_event_markets(event_id: str):
+    db = get_db()
+    admin_user = require_admin(request, db)
+    try:
+        result = sync_event_markets(db, event_id, admin_user=admin_user)
+        return jsonify({"ok": True, "result": result, "events": admin_events_payload(db)})
+    except Exception as exc:
+        return sync_error_json(db, "fetch_event_markets_failed", exc, {"event_id": event_id})
 
 
 @app.get("/api/admin/aliases")
@@ -648,6 +658,54 @@ def requested_sport_keys(payload: dict[str, Any]) -> list[str] | None:
     if isinstance(sport_keys, list):
         return [str(item) for item in sport_keys if item]
     return None
+
+
+def admin_events_payload(db) -> list[dict[str, Any]]:
+    events = db.select(
+        "events",
+        {
+            "select": "*",
+            "order": "commence_time.desc",
+            "limit": "250",
+        },
+    )
+    if not events:
+        return []
+
+    sport_keys = sorted({event["sport_key"] for event in events if event.get("sport_key")})
+    sports = {
+        row["sport_key"]: row
+        for row in db.select("sports", {"select": "*", "sport_key": f"in.({','.join(sport_keys)})"})
+    } if sport_keys else {}
+
+    event_ids = [event["id"] for event in events if event.get("id")]
+    odds_rows = db.select(
+        "odds_current",
+        {
+            "select": "event_id,market_key",
+            "event_id": f"in.({','.join(event_ids)})",
+            "limit": "10000",
+        },
+    ) if event_ids else []
+    odds_count_by_event: dict[str, int] = {}
+    markets_by_event: dict[str, set[str]] = {}
+    for row in odds_rows:
+        odds_count_by_event[row["event_id"]] = odds_count_by_event.get(row["event_id"], 0) + 1
+        markets_by_event.setdefault(row["event_id"], set()).add(row["market_key"])
+
+    result = []
+    for event in events:
+        sport = sports.get(event["sport_key"], {})
+        result.append(
+            {
+                **event,
+                "league_title": sport.get("title_ru") or sport.get("title_en") or event["sport_key"],
+                "odds_count": odds_count_by_event.get(event["id"], 0),
+                "markets_count": len(markets_by_event.get(event["id"], set())),
+                "can_fetch_markets": event.get("source") == "odds_api" and bool(event.get("external_event_id")),
+            }
+        )
+    return result
 
 
 def manual_events_payload(db) -> dict[str, Any]:

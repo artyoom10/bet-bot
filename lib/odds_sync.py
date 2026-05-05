@@ -6,7 +6,7 @@ from typing import Any
 
 from lib.config import SPORT_KEYS
 from lib.errors import AppError
-from lib.odds_api import fetch_events_for_sport, fetch_odds_for_sport, refresh_usage as fetch_usage
+from lib.odds_api import fetch_event_markets, fetch_event_odds, fetch_events_for_sport, fetch_odds_for_sport, refresh_usage as fetch_usage
 from lib.supabase_client import SupabaseRestClient
 from lib.team_mapping import find_team_by_raw_name, resolve_selection_name_ru
 from lib.users import first
@@ -327,6 +327,163 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
     return counts
 
 
+def sync_event_markets(
+    db: SupabaseRestClient,
+    event_id: str,
+    *,
+    admin_user: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    event = first(db.select("events", {"select": "*", "id": f"eq.{event_id}", "limit": "1"}))
+    if not event:
+        raise AppError("event_not_found", "Событие не найдено", 404)
+    if event.get("source") != "odds_api" or not event.get("external_event_id"):
+        raise AppError("event_markets_not_supported", "Подробные рынки можно подтянуть только для событий Odds API", 400)
+
+    now = datetime.now(timezone.utc).isoformat()
+    market_result = fetch_event_markets(event["sport_key"], event["external_event_id"])
+    available_markets = sorted(
+        {
+            market.get("key")
+            for bookmaker in market_result.get("data", {}).get("bookmakers", [])
+            for market in bookmaker.get("markets", [])
+            if supported_event_market(market.get("key"))
+        }
+    )
+    if not available_markets:
+        raise AppError("event_markets_empty", "Odds API не вернул доступные рынки для события", 502)
+
+    home_team = find_team_by_raw_name(db, "odds_api", event["sport_key"], event["home_team_raw"])
+    away_team = find_team_by_raw_name(db, "odds_api", event["sport_key"], event["away_team_raw"])
+
+    counts = {
+        "event_id": event_id,
+        "external_event_id": event["external_event_id"],
+        "sport_key": event["sport_key"],
+        "available_markets_count": len(available_markets),
+        "available_markets": available_markets,
+        "requested_markets": [],
+        "odds_count": 0,
+        "bookmakers_count": 0,
+        "snapshots_count": 0,
+        "quota_last_total": market_result.get("quota_last") or 0,
+        "quota_remaining": market_result.get("quota_remaining"),
+        "quota_used": market_result.get("quota_used"),
+        "request_urls": [market_result.get("request_url")],
+        "regions_requested": market_result.get("regions"),
+    }
+
+    for market_chunk in chunked(available_markets, 25):
+        odds_result = fetch_event_odds(event["sport_key"], event["external_event_id"], market_chunk)
+        counts["requested_markets"].extend(market_chunk)
+        counts["quota_last_total"] += odds_result.get("quota_last") or 0
+        counts["quota_remaining"] = odds_result.get("quota_remaining")
+        counts["quota_used"] = odds_result.get("quota_used")
+        counts["request_urls"].append(odds_result.get("request_url"))
+        source_event = odds_result.get("data") or {}
+        process_event_odds_payload(
+            db,
+            event,
+            source_event,
+            home_team,
+            away_team,
+            now,
+            counts,
+        )
+
+    db.update(
+        "events",
+        {
+            "last_odds_sync_at": now,
+            "updated_at": now,
+            "raw_payload": {**(event.get("raw_payload") or {}), "detailed_markets_last_sync_at": now},
+        },
+        {"id": f"eq.{event_id}"},
+    )
+    if admin_user:
+        log_admin_action(db, admin_user, "fetch_event_markets", "event", event_id, counts)
+    return counts
+
+
+def process_event_odds_payload(
+    db: SupabaseRestClient,
+    event: dict[str, Any],
+    source_event: dict[str, Any],
+    home_team: dict[str, Any] | None,
+    away_team: dict[str, Any] | None,
+    now: str,
+    counts: dict[str, Any],
+) -> None:
+    for bookmaker in source_event.get("bookmakers", []):
+        bookmaker_key = bookmaker["key"]
+        db.upsert(
+            "bookmakers",
+            {"bookmaker_key": bookmaker_key, "title": bookmaker.get("title") or bookmaker_key, "updated_at": now},
+            "bookmaker_key",
+        )
+        counts["bookmakers_count"] += 1
+        for market in bookmaker.get("markets", []):
+            market_key = market.get("key")
+            if not supported_event_market(market_key):
+                continue
+            for outcome in market.get("outcomes", []):
+                odd_payload = odd_payload_for_outcome(
+                    event["id"],
+                    bookmaker_key,
+                    market_key,
+                    outcome,
+                    event["home_team_raw"],
+                    event["away_team_raw"],
+                    home_team,
+                    away_team,
+                    now,
+                )
+                if not odd_payload:
+                    continue
+
+                old = first(
+                    db.select(
+                        "odds_current",
+                        {
+                            "select": "*",
+                            "event_id": f"eq.{event['id']}",
+                            "bookmaker_key": f"eq.{bookmaker_key}",
+                            "market_key": f"eq.{odd_payload['market_key']}",
+                            "selection_key": f"eq.{odd_payload['selection_key']}",
+                            "limit": "1",
+                        },
+                    )
+                )
+                odd_payload["api_last_update"] = market.get("last_update") or bookmaker.get("last_update")
+                db.upsert("odds_current", odd_payload, "event_id,bookmaker_key,market_key,selection_key")
+                counts["odds_count"] += 1
+                if not old or float(old["price"]) != float(odd_payload["price"]):
+                    db.insert(
+                        "odds_snapshots",
+                        {
+                            "event_id": event["id"],
+                            "bookmaker_key": bookmaker_key,
+                            "market_key": odd_payload["market_key"],
+                            "selection_key": odd_payload["selection_key"],
+                            "selection_name_raw": odd_payload["selection_name_raw"],
+                            "price": odd_payload["price"],
+                            "api_last_update": odd_payload["api_last_update"],
+                        },
+                    )
+                    counts["snapshots_count"] += 1
+
+
+def supported_event_market(market_key: str | None) -> bool:
+    if not market_key:
+        return False
+    if market_key.endswith("_lay"):
+        return False
+    return market_key not in {"outrights", "outrights_lay"}
+
+
+def chunked(items: list[str], size: int) -> list[list[str]]:
+    return [items[index : index + size] for index in range(0, len(items), size)]
+
+
 def upsert_api_event(
     db: SupabaseRestClient,
     sport_key: str,
@@ -434,7 +591,7 @@ def odd_payload_for_outcome(
             return None
         selection_name_ru = resolve_selection_name_ru(selection_key, outcome_name, home_team, away_team)
 
-    elif market_key == "totals":
+    elif market_key in {"totals", "alternate_totals"}:
         point = outcome.get("point")
         if point is None:
             return None
@@ -450,7 +607,7 @@ def odd_payload_for_outcome(
             return None
         selection_name_raw = f"{outcome_name} {line_label}"
 
-    elif market_key == "spreads":
+    elif market_key in {"spreads", "alternate_spreads"}:
         point = outcome.get("point")
         if point is None:
             return None
