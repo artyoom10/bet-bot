@@ -132,7 +132,7 @@ def get_sports_for_app(db: SupabaseRestClient) -> list[dict[str, Any]]:
     events = db.select(
         "events",
         {
-            "select": "sport_key",
+            "select": "id,sport_key",
             "status": "eq.upcoming",
             "commence_time": f"gt.{datetime.now(timezone.utc).isoformat()}",
             "limit": "1000",

@@ -35,10 +35,15 @@
           <h1>{{ app_name }}</h1>
         </div>
         <div class="top-actions">
-          <button class="balance" id="open-profile" type="button">
-            <span id="profile-name">Игрок</span>
-            <strong id="balance-value">0 <span class="currency-star">✦</span></strong>
-          </button>
+          <div class="balance-card">
+            <button class="balance" id="open-profile" type="button">
+              <span id="profile-name">Игрок</span>
+              <strong id="balance-value">0 <span class="currency-star">✦</span></strong>
+            </button>
+            <button class="balance-refresh" id="refresh-profile" type="button" aria-label="Обновить баланс">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.4 6.4L4 17"/><path d="M3 12A9 9 0 0 1 18.4 5.6L20 7"/><path d="M4 21v-4h4"/><path d="M20 3v4h-4"/></svg>
+            </button>
+          </div>
         </div>
       </header>
 

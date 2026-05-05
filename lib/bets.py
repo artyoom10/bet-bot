@@ -160,10 +160,31 @@ def get_user_bets(db: SupabaseRestClient, user: dict[str, Any]) -> list[dict[str
 
     bet_ids = [bet["id"] for bet in bets]
     selections = db.select("bet_selections", {"select": "*", "bet_id": f"in.({','.join(bet_ids)})", "order": "created_at.asc"})
+    event_ids = sorted({selection["event_id"] for selection in selections if selection.get("event_id")})
+    events_by_id: dict[str, dict[str, Any]] = {}
+    teams_by_id: dict[str, dict[str, Any]] = {}
+    if event_ids:
+        events = db.select("events", {"select": "*", "id": f"in.({','.join(event_ids)})", "limit": "200"})
+        events_by_id = {event["id"]: event for event in events}
+        team_ids = sorted(
+            {
+                team_id
+                for event in events
+                for team_id in (event.get("home_team_id"), event.get("away_team_id"))
+                if team_id
+            }
+        )
+        if team_ids:
+            teams_by_id = {
+                team["id"]: team
+                for team in db.select("teams", {"select": "*", "id": f"in.({','.join(team_ids)})", "limit": "400"})
+            }
+
     by_bet: dict[str, list[dict[str, Any]]] = {}
     for selection in selections:
         item = dict(selection)
         item["price"] = float(item["price"])
+        enrich_selection_with_event(item, events_by_id, teams_by_id)
         by_bet.setdefault(selection["bet_id"], []).append(item)
 
     result = []
@@ -177,6 +198,36 @@ def get_user_bets(db: SupabaseRestClient, user: dict[str, Any]) -> list[dict[str
         result.append(item)
 
     return result
+
+
+def enrich_selection_with_event(
+    selection: dict[str, Any],
+    events_by_id: dict[str, dict[str, Any]],
+    teams_by_id: dict[str, dict[str, Any]],
+) -> None:
+    event = events_by_id.get(selection.get("event_id"))
+    if not event:
+        return
+
+    home_team = teams_by_id.get(event.get("home_team_id"))
+    away_team = teams_by_id.get(event.get("away_team_id"))
+    home_name = (home_team or {}).get("name_ru") or selection.get("home_team_name_ru") or event.get("home_team_raw")
+    away_name = (away_team or {}).get("name_ru") or selection.get("away_team_name_ru") or event.get("away_team_raw")
+
+    selection.update(
+        {
+            "event_status": event.get("status"),
+            "home_score": event.get("home_score"),
+            "away_score": event.get("away_score"),
+            "result_winner": event.get("result_winner"),
+            "settled_at": event.get("settled_at"),
+            "home_team_name_ru": home_name,
+            "away_team_name_ru": away_name,
+            "home_team_logo_url": (home_team or {}).get("logo_url"),
+            "away_team_logo_url": (away_team or {}).get("logo_url"),
+        }
+    )
+    selection["event_name_ru"] = selection.get("event_name_ru") or f"{home_name} — {away_name}"
 
 
 def selection_name_for_key(selection_key: str, odd: dict[str, Any], home_name: str, away_name: str) -> str:
