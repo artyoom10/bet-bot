@@ -18,17 +18,23 @@ SELECTION_LABELS = {
 
 MARKET_TITLES = {
     "h2h": "Исход матча",
+    "h2h_3_way": "Исход матча",
     "double_chance": "Двойной шанс",
     "totals": "Тотал",
     "alternate_totals": "Альтернативный тотал",
+    "alternate_totals_h1": "Альтернативный тотал 1-го тайма",
+    "alternate_totals_h2": "Альтернативный тотал 2-го тайма",
     "spreads": "Фора",
     "alternate_spreads": "Альтернативная фора",
+    "alternate_spreads_h1": "Альтернативная фора 1-го тайма",
+    "alternate_spreads_h2": "Альтернативная фора 2-го тайма",
     "video_review": "Видеопросмотр",
     "player_goal": "Гол игрока",
     "player_assist": "Передача игрока",
 }
 
 DEFAULT_SPORT_TITLES = {
+    "soccer_epl": "Английская Премьер-лига",
     "soccer_russia_premier_league": "Российская Премьер-Лига",
     "soccer_spain_la_liga": "Ла Лига",
     "soccer_uefa_champs_league": "Лига чемпионов",
@@ -192,7 +198,22 @@ def format_markets(rows: list[dict[str, Any]], bookmakers: dict[str, dict[str, A
         if row["market_key"] not in market_keys:
             market_keys.append(row["market_key"])
 
-    market_order = {"h2h": 0, "double_chance": 2, "totals": 3, "alternate_totals": 4, "spreads": 5, "alternate_spreads": 6, "video_review": 7, "player_goal": 8, "player_assist": 9}
+    market_order = {
+        "h2h": 0,
+        "h2h_3_way": 1,
+        "double_chance": 2,
+        "totals": 3,
+        "alternate_totals": 4,
+        "alternate_totals_h1": 5,
+        "alternate_totals_h2": 6,
+        "spreads": 7,
+        "alternate_spreads": 8,
+        "alternate_spreads_h1": 9,
+        "alternate_spreads_h2": 10,
+        "video_review": 11,
+        "player_goal": 12,
+        "player_assist": 13,
+    }
     for market_key in sorted(market_keys, key=lambda key: market_order.get(key, 99)):
         market_rows = choose_market_odds(rows, market_key)
         if not market_rows:

@@ -24,6 +24,7 @@ const state = {
   ticketExpanded: false,
   stake: 100,
   activeTab: 'events',
+  scrollLocks: new Set(),
 };
 
 const labels = { home_win: 'П1', draw: 'X', away_win: 'П2', home_or_draw: '1X', home_or_away: '12', draw_or_away: 'X2' };
@@ -31,9 +32,25 @@ const statusLabels = { pending: 'ожидает', won: 'выиграла', lost:
 const eventStatusLabels = { upcoming: 'ожидает', finished: 'завершён', cancelled: 'отменён' };
 const clientStatusLabels = { new: 'новый', active: 'активный', vip: 'VIP', test: 'тестовый', restricted: 'ограничен', suspended: 'приостановлен' };
 const sportTypeLabels = { soccer: 'Футбол', hockey: 'Хоккей', esports: 'Киберспорт' };
-const marketTitles = { h2h: 'Исход матча', double_chance: 'Двойной шанс', totals: 'Тотал', alternate_totals: 'Альтернативный тотал', spreads: 'Фора', alternate_spreads: 'Альтернативная фора', video_review: 'Видеопросмотр', player_goal: 'Гол игрока', player_assist: 'Передача игрока' };
-const defaultSportKeys = ['soccer_russia_premier_league', 'soccer_spain_la_liga', 'soccer_uefa_champs_league', 'icehockey_nhl'];
+const marketTitles = {
+  h2h: 'Исход матча',
+  h2h_3_way: 'Исход матча',
+  double_chance: 'Двойной шанс',
+  totals: 'Тотал',
+  alternate_totals: 'Альтернативный тотал',
+  alternate_totals_h1: 'Альтернативный тотал 1-го тайма',
+  alternate_totals_h2: 'Альтернативный тотал 2-го тайма',
+  spreads: 'Фора',
+  alternate_spreads: 'Альтернативная фора',
+  alternate_spreads_h1: 'Альтернативная фора 1-го тайма',
+  alternate_spreads_h2: 'Альтернативная фора 2-го тайма',
+  video_review: 'Видеопросмотр',
+  player_goal: 'Гол игрока',
+  player_assist: 'Передача игрока',
+};
+const defaultSportKeys = ['soccer_epl', 'soccer_russia_premier_league', 'soccer_spain_la_liga', 'soccer_uefa_champs_league', 'icehockey_nhl'];
 const defaultSportTitles = {
+  soccer_epl: 'Английская Премьер-лига',
   soccer_russia_premier_league: 'Российская Премьер-Лига',
   soccer_spain_la_liga: 'Ла Лига',
   soccer_uefa_champs_league: 'Лига чемпионов',
@@ -95,18 +112,61 @@ function closeNotice() {
   document.querySelector('#notice-modal').hidden = true;
 }
 
+function lockBodyScroll(reason) {
+  state.scrollLocks.add(reason);
+  document.body.classList.add('no-scroll');
+}
+
+function unlockBodyScroll(reason) {
+  state.scrollLocks.delete(reason);
+  if (!state.scrollLocks.size) {
+    document.body.classList.remove('no-scroll');
+  }
+}
+
 function showLoading(title, text = 'Подождите, операция выполняется.') {
+  const modal = document.querySelector('#loading-modal');
+  modal.className = 'loading-modal';
+  modal.querySelectorAll('.loading-confetti').forEach((item) => item.remove());
   document.querySelector('#loading-title').textContent = title;
   document.querySelector('#loading-text').textContent = text;
-  document.querySelector('#loading-modal').hidden = false;
+  modal.hidden = false;
+  lockBodyScroll('loading');
 }
 
 function updateLoading(text) {
   document.querySelector('#loading-text').textContent = text;
 }
 
+function showLoadingSuccess(title = 'Готово', text = 'Операция выполнена.') {
+  showLoading(title, text);
+  const modal = document.querySelector('#loading-modal');
+  modal.classList.add('success');
+  const card = modal.querySelector('.loading-card');
+  const confetti = document.createElement('div');
+  confetti.className = 'loading-confetti';
+  const colors = ['#2f80ed', '#16a36a', '#f3b51f', '#9cc8ff'];
+  for (let index = 0; index < 18; index += 1) {
+    const piece = document.createElement('span');
+    piece.style.setProperty('--x', `${Math.round((Math.random() * 180) - 90)}px`);
+    piece.style.setProperty('--r', `${Math.round((Math.random() * 360) - 180)}deg`);
+    piece.style.setProperty('--delay', `${Math.random() * 160}ms`);
+    piece.style.setProperty('--confetti-color', colors[index % colors.length]);
+    confetti.appendChild(piece);
+  }
+  card.appendChild(confetti);
+}
+
 function hideLoading() {
-  document.querySelector('#loading-modal').hidden = true;
+  const modal = document.querySelector('#loading-modal');
+  modal.hidden = true;
+  modal.className = 'loading-modal';
+  modal.querySelectorAll('.loading-confetti').forEach((item) => item.remove());
+  unlockBodyScroll('loading');
+}
+
+function delay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function showBlockedScreen(reason) {
@@ -273,6 +333,7 @@ function setAdminVisibility(isAdmin) {
     document.querySelector('#admin-drawer')?.classList.remove('open');
     document.querySelector('#admin-drawer')?.setAttribute('aria-hidden', 'true');
     document.querySelector('#admin-backdrop').hidden = true;
+    unlockBodyScroll('admin');
     if (location.hash.startsWith('#/admin')) history.replaceState(null, '', location.pathname + location.search);
   }
 }
@@ -395,7 +456,7 @@ function renderEvent(event) {
           const active = state.selections.some((item) => item.event.id === event.id && item.outcome.selection_key === outcome.selection_key);
           return `
             <button class="odd-cell ${active ? 'active' : ''}" data-event="${event.id}" data-bookmaker="${event.odds.bookmaker_key}" data-market="${event.odds.market_key}" data-selection="${outcome.selection_key}">
-              <span>${labels[outcome.selection_key] || outcome.label}</span><strong>${Number(outcome.price).toFixed(2)}</strong>
+              <span>${escapeHtml(shortOutcomeLabel(outcome, event.odds.market_key, event))}</span><strong>${Number(outcome.price).toFixed(2)}</strong>
             </button>
           `;
         }).join('')}
@@ -418,6 +479,79 @@ function teamLogo(team) {
   return `<img class="team-logo" src="${escapeAttr(team.logo_url)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'team-logo placeholder', textContent: '${escapeAttr((team?.name || 'Ф')[0])}'}))">`;
 }
 
+function marketTitleFor(marketKey, sportKey = '') {
+  if (marketKey === 'h2h' && sportKey.startsWith('icehockey_')) return 'Итоговая победа';
+  return marketTitles[marketKey] || marketKey;
+}
+
+function shortOutcomeLabel(outcome, marketKey = '', event = null) {
+  if (['h2h', 'h2h_3_way', 'double_chance'].includes(marketKey) && labels[outcome.selection_key]) {
+    return labels[outcome.selection_key];
+  }
+  return outcomeNameRu(outcome, marketKey, event);
+}
+
+function outcomeNameRu(outcome, marketKey = '', event = null) {
+  const key = outcome?.selection_key || '';
+  const name = String(outcome?.name || outcome?.label || '').trim();
+  if (key === 'home_win') return event?.home_team?.name || 'П1';
+  if (key === 'draw') return 'Ничья';
+  if (key === 'away_win') return event?.away_team?.name || 'П2';
+  if (key === 'home_or_draw') return '1X';
+  if (key === 'home_or_away') return '12';
+  if (key === 'draw_or_away') return 'X2';
+  if (key.startsWith('total_over')) return `ТБ ${formatLineLabel(lineFromSelection(key))}`;
+  if (key.startsWith('total_under')) return `ТМ ${formatLineLabel(lineFromSelection(key))}`;
+  if (key.startsWith('handicap_home')) return `Ф1 (${formatSignedLineLabel(lineFromSelection(key))})`;
+  if (key.startsWith('handicap_away')) return `Ф2 (${formatSignedLineLabel(lineFromSelection(key))})`;
+
+  const lowerName = name.toLowerCase();
+  const line = extractLineLabel(name);
+  if (isTotalMarketKey(marketKey)) {
+    if (lowerName.includes('over')) return `ТБ ${line || ''}`.trim();
+    if (lowerName.includes('under')) return `ТМ ${line || ''}`.trim();
+  }
+  if (isSpreadMarketKey(marketKey)) {
+    if (matchesTeamName(name, event?.home_team)) return `Ф1 (${line || '0'})`;
+    if (matchesTeamName(name, event?.away_team)) return `Ф2 (${line || '0'})`;
+  }
+  if (lowerName === 'draw') return 'Ничья';
+  if (matchesTeamName(name, event?.home_team)) return event.home_team.name;
+  if (matchesTeamName(name, event?.away_team)) return event.away_team.name;
+  return name || key || 'Исход';
+}
+
+function matchesTeamName(name, team) {
+  if (!name || !team) return false;
+  const normalized = String(name).trim().toLowerCase();
+  return [team.name, team.raw_name].filter(Boolean).some((value) => normalized.includes(String(value).trim().toLowerCase()));
+}
+
+function isTotalMarketKey(marketKey = '') {
+  return marketKey === 'totals' || marketKey.startsWith('alternate_totals');
+}
+
+function isSpreadMarketKey(marketKey = '') {
+  return marketKey === 'spreads' || marketKey.startsWith('alternate_spreads');
+}
+
+function extractLineLabel(value) {
+  const match = String(value || '').match(/[+-]?\s*\d+(?:[.,]\d+)?/);
+  return match ? match[0].replace(/\s+/g, '').replace('.', ',') : '';
+}
+
+function formatLineLabel(value) {
+  return Number(value || 0).toLocaleString('ru-RU', { minimumFractionDigits: Number.isInteger(Number(value)) ? 0 : 1, maximumFractionDigits: 2 });
+}
+
+function formatSignedLineLabel(value) {
+  const number = Number(value || 0);
+  const label = formatLineLabel(Math.abs(number));
+  if (number > 0) return `+${label}`;
+  if (number < 0) return `-${label}`;
+  return '0';
+}
+
 function openEventCard(eventId) {
   const event = state.events.find((item) => item.id === eventId);
   if (!event) return;
@@ -436,13 +570,13 @@ function openEventCard(eventId) {
     </div>
     ${(event.markets?.length ? event.markets : [event.odds]).map((market) => `
       <section class="market-section">
-        <h3>${escapeHtml(market.title || marketTitles[market.market_key] || market.market_key)}</h3>
+        <h3>${escapeHtml(market.title || marketTitleFor(market.market_key, event.sport_key))}</h3>
         <div class="market-row ${market.outcomes.length === 2 ? 'two' : ''}">
           ${market.outcomes.map((outcome) => {
             const active = state.selections.some((item) => item.event.id === event.id && item.outcome.selection_key === outcome.selection_key && item.market_key === market.market_key);
             return `
               <button class="odd-cell ${active ? 'active' : ''}" data-modal-selection data-event="${event.id}" data-bookmaker="${market.bookmaker_key}" data-market="${market.market_key}" data-selection="${outcome.selection_key}">
-                <span>${escapeHtml(labels[outcome.selection_key] || outcome.label || outcome.name)}</span><strong>${Number(outcome.price).toFixed(2)}</strong>
+                <span>${escapeHtml(outcomeNameRu(outcome, market.market_key, event))}</span><strong>${Number(outcome.price).toFixed(2)}</strong>
               </button>
             `;
           }).join('')}
@@ -451,7 +585,7 @@ function openEventCard(eventId) {
     `).join('')}
   `;
   document.querySelector('#event-modal').hidden = false;
-  document.body.classList.add('no-scroll');
+  lockBodyScroll('event');
   document.querySelector('#close-event-card').addEventListener('click', closeEventCard);
   document.querySelectorAll('[data-modal-selection]').forEach((button) => {
     button.addEventListener('click', (eventClick) => {
@@ -464,7 +598,7 @@ function openEventCard(eventId) {
 
 function closeEventCard() {
   document.querySelector('#event-modal').hidden = true;
-  document.body.classList.remove('no-scroll');
+  unlockBodyScroll('event');
   state.selectedEventId = null;
 }
 
@@ -477,7 +611,7 @@ function toggleSelection(button) {
     state.selections = state.selections.filter((item) => item.event.id !== event.id);
   } else {
     state.selections = state.selections.filter((item) => item.event.id !== event.id);
-    state.selections.push({ event, outcome, bookmaker_key: market.bookmaker_key, market_key: market.market_key, market_title: market.title || marketTitles[market.market_key] });
+    state.selections.push({ event, outcome, bookmaker_key: market.bookmaker_key, market_key: market.market_key, market_title: market.title || marketTitleFor(market.market_key, event.sport_key) });
   }
   renderEvents();
   renderTicket();
@@ -507,10 +641,16 @@ function renderTicket() {
     slip.hidden = true;
     slip.classList.remove('expanded');
     state.ticketExpanded = false;
+    unlockBodyScroll('ticket');
     return;
   }
   slip.hidden = false;
   slip.classList.toggle('expanded', state.ticketExpanded);
+  if (state.ticketExpanded) {
+    lockBodyScroll('ticket');
+  } else {
+    unlockBodyScroll('ticket');
+  }
   const odds = totalOdds();
   const type = state.selections.length === 1 ? 'Ординар' : 'Экспресс';
   const validation = ticketValidation();
@@ -530,7 +670,7 @@ function renderTicket() {
     <article class="ticket-item">
       <div>
         <strong>${escapeHtml(item.event.home_team.name)} — ${escapeHtml(item.event.away_team.name)}</strong>
-        <p>${ticketSelectionPrefix(item)} ${escapeHtml(item.market_title || marketTitles[item.market_key] || item.market_key)} · ${escapeHtml(item.outcome.name)}</p>
+        <p>${ticketSelectionPrefix(item)} ${escapeHtml(item.market_title || marketTitleFor(item.market_key, item.event.sport_key))} · ${escapeHtml(outcomeNameRu(item.outcome, item.market_key, item.event))}</p>
       </div>
       <strong>${Number(item.outcome.price).toFixed(2)}</strong>
       <button type="button" data-remove-selection="${index}">×</button>
@@ -598,10 +738,11 @@ async function submitBet() {
     state.me.wallet = result.wallet;
     document.querySelector('#balance-value').innerHTML = moneyHtml(result.wallet.balance);
     renderProfileView();
-    notify('Ставка принята', 'success');
     tg?.HapticFeedback?.notificationOccurred('success');
     clearTicket();
     await loadBets();
+    showLoadingSuccess('Ставка принята', 'Купон добавлен в раздел Мои пари');
+    await delay(950);
   } finally {
     hideLoading();
   }
@@ -623,10 +764,27 @@ function renderBetCollection(selector, bets, emptyText) {
   const root = document.querySelector(selector);
   if (!root) return;
   if (!bets.length) {
-    root.innerHTML = `<article class="empty-state">${emptyText}</article>`;
+    root.innerHTML = renderEmptyState(selector, emptyText);
     return;
   }
   root.innerHTML = bets.map(renderBetCard).join('');
+}
+
+function renderEmptyState(selector, emptyText) {
+  const titles = {
+    '#bets': ['Пари появятся здесь', 'Выберите исход в линии, и купон сразу станет доступен внизу экрана.'],
+    '#history': ['История пока пустая', 'После расчёта ставок здесь будут выигрыши, проигрыши и возвраты.'],
+  };
+  const [title, subtitle] = titles[selector] || [emptyText, ''];
+  return `
+    <article class="empty-state empty-state-center">
+      <div class="empty-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M6 4h12a2 2 0 0 1 2 2v14l-3-2-3 2-3-2-3 2-3-2V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 13h5"/></svg>
+      </div>
+      <h2>${escapeHtml(title)}</h2>
+      <p>${escapeHtml(subtitle || emptyText)}</p>
+    </article>
+  `;
 }
 
 function renderBetCard(bet) {
@@ -676,12 +834,28 @@ function renderBetSelection(selection) {
         <span>${teamLogo(away)}<strong>${escapeHtml(away.name || 'Команда 2')}</strong></span>
       </div>
       <div class="selection-details">
-        <span>${escapeHtml(marketTitles[selection.market_key] || selection.market_key)}</span>
-        <strong>${escapeHtml(selection.selection_name_ru || selection.selection_name_raw)}</strong>
+        <span>${escapeHtml(marketTitleFor(selection.market_key))}</span>
+        <strong>${escapeHtml(selectionDisplayName(selection, home, away))}</strong>
         <em>${result.label}</em>
       </div>
     </article>
   `;
+}
+
+function selectionDisplayName(selection, home, away) {
+  const event = {
+    home_team: { name: home.name, raw_name: home.name },
+    away_team: { name: away.name, raw_name: away.name },
+  };
+  return outcomeNameRu(
+    {
+      selection_key: selection.selection_key,
+      name: selection.selection_name_ru || selection.selection_name_raw,
+      label: selection.selection_name_ru || selection.selection_name_raw,
+    },
+    selection.market_key,
+    event,
+  );
 }
 
 function eventNamePart(name = '', index = 0) {
@@ -726,7 +900,7 @@ function renderProfileView() {
 
 function closeProfileCard() {
   document.querySelector('#profile-modal').hidden = true;
-  document.body.classList.remove('no-scroll');
+  unlockBodyScroll('profile');
 }
 
 async function loadAdmin() {
@@ -734,6 +908,7 @@ async function loadAdmin() {
   renderDashboard(dashboard);
   renderSyncRuns(runs);
   renderApiUsage(dashboard.odds_api_usage);
+  renderSyncSportControls();
 }
 
 function renderDashboard(data) {
@@ -756,16 +931,15 @@ function renderSyncDebug(payload, selector) {
   const id = `debug-${++state.debugReportSeq}`;
   const json = JSON.stringify(payload, null, 2);
   state.debugReports[id] = json;
+  const title = payload.sport_title ? `Debug: ${payload.sport_title}` : 'Подробный debug ответа';
   root.insertAdjacentHTML('beforeend', `
     <details class="debug-box" open>
-      <summary>Подробный debug ответа</summary>
+      <summary>${escapeHtml(title)}</summary>
       <button class="copy-debug" type="button" data-copy-debug="${id}">Скопировать debug</button>
       <pre>${escapeHtml(json)}</pre>
     </details>
   `);
-  root.querySelectorAll('[data-copy-debug]').forEach((button) => {
-    button.addEventListener('click', () => copyDebugReport(button.dataset.copyDebug));
-  });
+  root.querySelector(`[data-copy-debug="${id}"]`)?.addEventListener('click', () => copyDebugReport(id));
 }
 
 function renderActionError(error, selector) {
@@ -816,30 +990,64 @@ function renderSyncRuns(runs) {
   `).join('') : '<p class="muted">Запусков пока нет.</p>';
 }
 
-async function syncOdds() {
-  showLoading('Синхронизация линии', 'Подготавливаю турниры...');
-  const sportKeys = syncSportKeys();
+function renderSyncSportControls() {
+  const root = document.querySelector('#sync-sports-list');
+  if (!root) return;
+  const items = syncSportKeys().map((key) => ({ sport_key: key, title: sportTitle(key) }));
+  root.innerHTML = items.map((sport) => `
+    <button class="sync-sport-button" data-sync-sport="${escapeAttr(sport.sport_key)}" type="button">
+      <span>${sportIcon(sport.sport_key, sport.title)}</span>
+      <strong>${escapeHtml(sport.title)}</strong>
+      <small>Отдельный sync</small>
+    </button>
+  `).join('');
+  root.querySelectorAll('[data-sync-sport]').forEach((button) => {
+    button.addEventListener('click', () => syncOdds(button.dataset.syncSport).catch((error) => {
+      status(error.message);
+      renderActionError(error, '#sync-debug-list');
+    }));
+  });
+}
+
+async function syncOdds(singleSportKey = '') {
+  showLoading('Синхронизация линии', singleSportKey ? `Подготавливаю: ${sportTitle(singleSportKey)}` : 'Подготавливаю турниры...');
+  document.querySelector('#sync-debug-list').innerHTML = '';
+  const sportKeys = singleSportKey ? [singleSportKey] : syncSportKeys();
   const responses = [];
   try {
     for (const sportKey of sportKeys) {
       updateLoading(`Обновляю: ${sportTitle(sportKey)}`);
+      const startedAt = new Date().toISOString();
       try {
         const result = await apiFetch('/api/admin/sync-odds', {
           method: 'POST',
           timeoutMs: 90000,
           body: JSON.stringify({ sport_keys: [sportKey] }),
         });
-        responses.push({ sport_key: sportKey, ok: true, result });
-      } catch (error) {
-        responses.push({
+        responses.push({ sport_key: sportKey, sport_title: sportTitle(sportKey), ok: true, result });
+        renderSyncDebug({
+          kind: 'sync_odds_sport',
           sport_key: sportKey,
+          sport_title: sportTitle(sportKey),
+          started_at: startedAt,
+          finished_at: new Date().toISOString(),
+          response: result,
+        }, '#sync-debug-list');
+      } catch (error) {
+        const errorReport = {
+          sport_key: sportKey,
+          sport_title: sportTitle(sportKey),
           ok: false,
           message: error.message,
           status: error.status || null,
           data: error.data || null,
           responseText: error.responseText || null,
-        });
-        break;
+          started_at: startedAt,
+          finished_at: new Date().toISOString(),
+        };
+        responses.push(errorReport);
+        renderSyncDebug({ kind: 'sync_odds_sport_error', ...errorReport }, '#sync-debug-list');
+        if (error.status === 409) break;
       }
     }
 
@@ -851,7 +1059,7 @@ async function syncOdds() {
     const eventsCount = success.reduce((sum, item) => sum + Number(item.result?.sync?.events_count || 0), 0);
     const oddsCount = success.reduce((sum, item) => sum + Number(item.result?.sync?.odds_count || 0), 0);
     const adminState = await collectAdminDebugState();
-    renderSyncDebug({ kind: 'sync_odds_by_sport', responses, admin_state: adminState }, '#admin-dashboard');
+    renderSyncDebug({ kind: 'sync_odds_summary', responses, admin_state: adminState }, '#sync-debug-list');
     status(failed.length ? `Sync остановлен с ошибкой: ${failed[0].message}` : `Sync завершён. Событий: ${eventsCount}, кэфов: ${oddsCount}`);
   } finally {
     hideLoading();
@@ -1536,7 +1744,7 @@ async function manualSettle() {
 
 function openAdminDrawer(route = 'menu') {
   if (!state.me?.user?.is_admin) return;
-  document.body.classList.add('no-scroll');
+  lockBodyScroll('admin');
   document.querySelector('#open-admin')?.classList.add('active');
   document.querySelector('#admin-drawer').classList.add('open');
   document.querySelector('#admin-drawer').setAttribute('aria-hidden', 'false');
@@ -1545,7 +1753,7 @@ function openAdminDrawer(route = 'menu') {
 }
 
 function closeAdminDrawer() {
-  document.body.classList.remove('no-scroll');
+  unlockBodyScroll('admin');
   document.querySelector('#open-admin')?.classList.remove('active');
   document.querySelector('#admin-drawer').classList.remove('open');
   document.querySelector('#admin-drawer').setAttribute('aria-hidden', 'true');

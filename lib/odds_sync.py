@@ -16,6 +16,11 @@ SYNC_STALE_AFTER_MINUTES = 3
 
 
 SPORT_TITLES = {
+    "soccer_epl": {
+        "title_en": "EPL",
+        "title_ru": "Английская Премьер-лига",
+        "group_name": "Soccer",
+    },
     "soccer_russia_premier_league": {
         "title_en": "Premier League - Russia",
         "title_ru": "Российская Премьер-Лига",
@@ -480,6 +485,14 @@ def supported_event_market(market_key: str | None) -> bool:
     return market_key not in {"outrights", "outrights_lay"}
 
 
+def is_total_market(market_key: str) -> bool:
+    return market_key in {"totals", "alternate_totals"} or market_key.startswith("alternate_totals_")
+
+
+def is_spread_market(market_key: str) -> bool:
+    return market_key in {"spreads", "alternate_spreads"} or market_key.startswith("alternate_spreads_")
+
+
 def chunked(items: list[str], size: int) -> list[list[str]]:
     return [items[index : index + size] for index in range(0, len(items), size)]
 
@@ -585,13 +598,13 @@ def odd_payload_for_outcome(
     selection_name_ru = ""
     selection_name_raw = outcome_name
 
-    if market_key == "h2h":
+    if market_key in {"h2h", "h2h_3_way"}:
         selection_key = selection_key_for_outcome(outcome_name, home_raw, away_raw)
         if not selection_key:
             return None
         selection_name_ru = resolve_selection_name_ru(selection_key, outcome_name, home_team, away_team)
 
-    elif market_key in {"totals", "alternate_totals"}:
+    elif is_total_market(market_key):
         point = outcome.get("point")
         if point is None:
             return None
@@ -607,7 +620,7 @@ def odd_payload_for_outcome(
             return None
         selection_name_raw = f"{outcome_name} {line_label}"
 
-    elif market_key in {"spreads", "alternate_spreads"}:
+    elif is_spread_market(market_key):
         point = outcome.get("point")
         if point is None:
             return None

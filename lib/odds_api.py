@@ -12,7 +12,9 @@ BASE_URL = "https://api.the-odds-api.com/v4"
 ODDS_MARKETS = ("h2h", "spreads", "totals")
 
 
-def odds_regions() -> str:
+def odds_regions(sport_key: str | None = None) -> str:
+    if sport_key and sport_key.startswith("icehockey_"):
+        return env("ODDS_API_HOCKEY_REGIONS", "us,eu")
     return env("ODDS_API_REGIONS", "eu")
 
 
@@ -27,7 +29,7 @@ def fetch_odds_for_sport(sport_key: str) -> dict[str, Any]:
 
     params = {
         "apiKey": api_key,
-        "regions": odds_regions(),
+        "regions": odds_regions(sport_key),
         "markets": ",".join(ODDS_MARKETS),
         "oddsFormat": "decimal",
         "dateFormat": "iso",
@@ -76,7 +78,7 @@ def fetch_event_markets(sport_key: str, event_id: str) -> dict[str, Any]:
 
     params = {
         "apiKey": api_key,
-        "regions": odds_regions(),
+        "regions": odds_regions(sport_key),
         "dateFormat": "iso",
     }
     response = requests.get(f"{BASE_URL}/sports/{sport_key}/events/{event_id}/markets", params=params, timeout=20)
@@ -102,7 +104,7 @@ def fetch_event_odds(sport_key: str, event_id: str, markets: list[str]) -> dict[
 
     params = {
         "apiKey": api_key,
-        "regions": odds_regions(),
+        "regions": odds_regions(sport_key),
         "markets": ",".join(markets),
         "oddsFormat": "decimal",
         "dateFormat": "iso",

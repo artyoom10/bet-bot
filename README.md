@@ -14,12 +14,14 @@ SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 ODDS_API_KEY=
 ODDS_API_REGIONS=eu
+ODDS_API_HOCKEY_REGIONS=us,eu
 ADMIN_TELEGRAM_IDS=
 DEBUG_ADMIN=0
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, and `ODDS_API_KEY` are backend-only secrets.
 `ODDS_API_REGIONS` can be expanded, for example `eu,uk`, if a league has events but no odds in the current region.
+`ODDS_API_HOCKEY_REGIONS` is optional and defaults to `us,eu`; NHL odds are often available in `us`, so hockey sync uses this value instead of the football region list.
 
 ## Supabase setup
 
