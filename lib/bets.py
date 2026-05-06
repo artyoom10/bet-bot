@@ -200,6 +200,77 @@ def get_user_bets(db: SupabaseRestClient, user: dict[str, Any]) -> list[dict[str
     return result
 
 
+def manual_settle_admin_bet(
+    db: SupabaseRestClient,
+    admin_user: dict[str, Any],
+    bet_id: str,
+    status: str,
+    payout: float | None = None,
+) -> dict[str, Any]:
+    bet = first(db.select("bets", {"select": "*", "id": f"eq.{bet_id}", "limit": "1"}))
+    if not bet:
+        raise AppError("bet_not_found", "Ставка не найдена", 404)
+    if bet.get("status") != "pending":
+        raise AppError("bet_already_settled", "Ставка уже рассчитана", 400)
+    if status not in {"won", "lost", "refund", "cancelled"}:
+        raise AppError("invalid_bet_status", "Выберите корректный статус", 400)
+
+    amount = float(bet["amount"])
+    if payout is None:
+        if status == "won":
+            payout = float(bet.get("possible_win") or 0)
+        elif status == "refund":
+            payout = amount
+        else:
+            payout = 0.0
+    try:
+        payout = round(float(payout), 2)
+    except (TypeError, ValueError) as exc:
+        raise AppError("invalid_payout", "Выплата должна быть числом", 400) from exc
+    if payout < 0:
+        raise AppError("invalid_payout", "Выплата не может быть отрицательной", 400)
+
+    claimed = db.update(
+        "bets",
+        {
+            "status": status,
+            "payout": payout,
+            "settlement_note": f"admin_manual:{admin_user.get('tg_id')}",
+            "settled_at": datetime.now(timezone.utc).isoformat(),
+        },
+        {"id": f"eq.{bet_id}", "status": "eq.pending"},
+    )
+    if not claimed:
+        raise AppError("bet_already_settled", "Ставка уже рассчитана", 400)
+
+    selection_status = {"won": "won", "lost": "lost", "refund": "refund", "cancelled": "refund"}[status]
+    db.update("bet_selections", {"result_status": selection_status}, {"bet_id": f"eq.{bet_id}", "result_status": "eq.pending"}, return_rows=False)
+
+    updated_bet = first(claimed) or {**bet, "status": status, "payout": payout}
+    if status == "won" and payout > 0:
+        credit_wallet(db, bet, payout, "bet_win")
+    elif status == "refund" and payout > 0:
+        credit_wallet(db, bet, payout, "bet_refund")
+    elif status == "lost":
+        record_loss(db, bet)
+
+    return {"bet": updated_bet}
+
+
+def delete_admin_bet(db: SupabaseRestClient, admin_user: dict[str, Any], bet_id: str) -> dict[str, Any]:
+    bet = first(db.select("bets", {"select": "*", "id": f"eq.{bet_id}", "limit": "1"}))
+    if not bet:
+        raise AppError("bet_not_found", "Ставка не найдена", 404)
+
+    refunded = False
+    if bet.get("status") == "pending":
+        credit_wallet(db, bet, float(bet["amount"]), "bet_refund")
+        refunded = True
+
+    deleted = db.delete("bets", {"id": f"eq.{bet_id}"})
+    return {"deleted": True, "refunded": refunded, "bet": first(deleted) or bet}
+
+
 def enrich_selection_with_event(
     selection: dict[str, Any],
     events_by_id: dict[str, dict[str, Any]],
@@ -220,6 +291,7 @@ def enrich_selection_with_event(
             "home_score": event.get("home_score"),
             "away_score": event.get("away_score"),
             "result_winner": event.get("result_winner"),
+            "result_note": event.get("result_note"),
             "settled_at": event.get("settled_at"),
             "home_team_name_ru": home_name,
             "away_team_name_ru": away_name,

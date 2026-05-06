@@ -10,8 +10,8 @@ from flask import Flask, jsonify, render_template, request
 
 from lib.admin_auth import require_admin
 from lib.admin_aliases import create_team_alias, get_aliases_dashboard, update_sport_alias, update_team_alias
-from lib.admin_users import create_admin_user, list_admin_users, update_admin_user
-from lib.bets import get_user_bets, place_bet
+from lib.admin_users import create_admin_user, delete_admin_user, list_admin_users, update_admin_user
+from lib.bets import delete_admin_bet, get_user_bets, manual_settle_admin_bet, place_bet
 from lib.config import SPORT_KEYS, admin_tg_ids, app_name
 from lib.errors import AppError, error_response
 from lib.events import default_sports, get_events_for_app, get_sports_for_app
@@ -56,6 +56,16 @@ def api_me():
     tg_id = str(tg_user["tg_id"])
     matched_admin_env = tg_id in admin_tg_ids()
     profile_error = None
+    existing_profile = find_user_by_tg(db, tg_id)
+
+    if not existing_profile and not matched_admin_env:
+        return jsonify(
+            {
+                "ok": True,
+                "access_denied": True,
+                "message": "Вы не являетесь членом данного клуба",
+            }
+        )
 
     is_admin_from_db = False
     try:
@@ -321,6 +331,13 @@ def api_admin_update_user(user_id: str):
     return jsonify({"ok": True, **update_admin_user(db, admin_user, user_id, payload)})
 
 
+@app.delete("/api/admin/users/<user_id>")
+def api_admin_delete_user(user_id: str):
+    db = get_db()
+    admin_user = require_admin(request, db)
+    return jsonify({"ok": True, **delete_admin_user(db, admin_user, user_id)})
+
+
 @app.post("/api/admin/sync-scores-and-settle")
 def api_admin_sync_scores_and_settle():
     db = get_db()
@@ -392,6 +409,7 @@ def api_admin_manual_result(event_id: str):
         event_id,
         home_score=home_score,
         away_score=away_score,
+        result_note=str(payload.get("result_note") or "").strip() or None,
     )
     return jsonify({"ok": True, "result": result})
 
@@ -447,6 +465,29 @@ def api_admin_bets():
     return jsonify({"ok": True, "bets": admin_bets_payload(db, sort=sort, limit=limit)})
 
 
+@app.post("/api/admin/bets/<bet_id>/manual-settlement")
+def api_admin_manual_bet_settlement(bet_id: str):
+    db = get_db()
+    admin_user = require_admin(request, db)
+    payload = request.get_json(silent=True) or {}
+    result = manual_settle_admin_bet(
+        db,
+        admin_user,
+        bet_id,
+        status=str(payload.get("status") or "").strip(),
+        payout=payload.get("payout"),
+    )
+    return jsonify({"ok": True, **result, "bets": admin_bets_payload(db, sort="created_desc", limit="250")})
+
+
+@app.delete("/api/admin/bets/<bet_id>")
+def api_admin_delete_bet(bet_id: str):
+    db = get_db()
+    admin_user = require_admin(request, db)
+    result = delete_admin_bet(db, admin_user, bet_id)
+    return jsonify({"ok": True, **result, "bets": admin_bets_payload(db, sort="created_desc", limit="250")})
+
+
 @app.post("/webhook")
 @app.post("/telegram/webhook")
 def telegram_webhook():
@@ -470,7 +511,14 @@ def telegram_webhook():
 
 def current_user(db):
     tg_user = get_verified_telegram_user(request)
+    tg_id = str(tg_user["tg_id"])
+    if not find_user_by_tg(db, tg_id) and tg_id not in admin_tg_ids():
+        raise AppError("not_member", "Вы не являетесь членом данного клуба", 403)
     return upsert_user_from_tg(db, tg_user)
+
+
+def find_user_by_tg(db, tg_id: str) -> dict[str, Any] | None:
+    return first(db.select("users", {"select": "*", "tg_id": f"eq.{tg_id}", "limit": "1"}))
 
 
 def handle_telegram_update(update: dict[str, Any]) -> None:
@@ -632,7 +680,7 @@ def settlement_endpoint_debug(db, payload: dict[str, Any]) -> dict[str, Any]:
     debug["finished_events"] = safe_debug_select(
         db,
         "events",
-        {"select": "id,sport_key,external_event_id,home_team_raw,away_team_raw,status,home_score,away_score,result_winner,result_last_update", "status": "in.(finished,cancelled)", "order": "result_last_update.desc", "limit": "10"},
+        {"select": "id,sport_key,external_event_id,home_team_raw,away_team_raw,status,home_score,away_score,result_winner,result_note,result_last_update", "status": "in.(finished,cancelled)", "order": "result_last_update.desc", "limit": "10"},
     )
     return debug
 
@@ -700,6 +748,7 @@ def admin_events_payload(db) -> list[dict[str, Any]]:
             {
                 **event,
                 "league_title": sport.get("title_ru") or sport.get("title_en") or event["sport_key"],
+                "league_logo_url": sport.get("logo_url") or None,
                 "odds_count": odds_count_by_event.get(event["id"], 0),
                 "markets_count": len(markets_by_event.get(event["id"], set())),
                 "can_fetch_markets": event.get("source") == "odds_api" and bool(event.get("external_event_id")),
@@ -904,9 +953,11 @@ def delete_manual_event(db, admin_user: dict[str, Any], event_id: str) -> dict[s
 
 
 def delete_manual_sport(db, admin_user: dict[str, Any], sport_key: str) -> dict[str, Any]:
-    sport = first(db.select("sports", {"select": "*", "sport_key": f"eq.{sport_key}", "source": "eq.manual", "limit": "1"}))
+    sport = first(db.select("sports", {"select": "*", "sport_key": f"eq.{sport_key}", "limit": "1"}))
     if not sport:
         raise AppError("manual_sport_not_found", "Ручное соревнование не найдено", 404)
+    if sport.get("source") != "manual" and not str(sport_key).startswith("manual_"):
+        raise AppError("manual_sport_not_found", "Удалять можно только созданные вручную соревнования", 400)
 
     events = db.select("events", {"select": "id", "sport_key": f"eq.{sport_key}", "source": "eq.manual", "limit": "500"})
     summary = {"events_deleted": 0, "events_cancelled": 0, "bets_settled": 0}
@@ -924,12 +975,12 @@ def delete_manual_sport(db, admin_user: dict[str, Any], sport_key: str) -> dict[
             db.update(
                 "sports",
                 {"is_enabled": False, "updated_at": datetime.now(timezone.utc).isoformat()},
-                {"sport_key": f"eq.{sport_key}", "source": "eq.manual"},
+                {"sport_key": f"eq.{sport_key}"},
             )
         )
         return {"deleted": False, "disabled": True, "sport": disabled or sport, **summary}
 
-    deleted = db.delete("sports", {"sport_key": f"eq.{sport_key}", "source": "eq.manual"})
+    deleted = db.delete("sports", {"sport_key": f"eq.{sport_key}"})
     return {"deleted": True, "sport": first(deleted) or sport, **summary}
 
 

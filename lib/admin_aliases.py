@@ -54,11 +54,14 @@ def get_aliases_dashboard(db: SupabaseRestClient) -> dict[str, Any]:
 def update_sport_alias(db: SupabaseRestClient, admin_user: dict[str, Any], sport_key: str, payload: dict[str, Any]) -> dict[str, Any]:
     title_ru = clean_text(payload.get("title_ru"))
     title_en = clean_text(payload.get("title_en"))
+    logo_url = clean_text(payload.get("logo_url"))
     patch = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if title_ru:
         patch["title_ru"] = title_ru
     if title_en:
         patch["title_en"] = title_en
+    if "logo_url" in payload:
+        patch["logo_url"] = logo_url or None
     if len(patch) == 1:
         raise AppError("empty_payload", "Нет данных для обновления", 400)
 

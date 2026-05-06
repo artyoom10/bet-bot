@@ -162,6 +162,18 @@ def update_admin_user(
     return {"user": updated_user, "wallet": wallet}
 
 
+def delete_admin_user(db: SupabaseRestClient, admin_user: dict[str, Any], user_id: str) -> dict[str, Any]:
+    user = first(db.select("users", {"select": "*", "id": f"eq.{user_id}", "limit": "1"}))
+    if not user:
+        raise AppError("user_not_found", "Пользователь не найден", 404)
+    if admin_user.get("id") and user_id == admin_user.get("id"):
+        raise AppError("delete_self_forbidden", "Нельзя удалить собственный админ-профиль", 400)
+
+    deleted = db.delete("users", {"id": f"eq.{user_id}"})
+    log_admin_action(db, admin_user, "delete_user", "user", user_id, {"tg_id": user.get("tg_id")})
+    return {"deleted": True, "user": first(deleted) or user}
+
+
 def clean_text(value: Any) -> str:
     return str(value or "").strip()
 

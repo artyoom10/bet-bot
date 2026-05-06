@@ -61,12 +61,18 @@ class SupabaseRestClient:
     def select(self, table: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         return self.request("GET", table, params=params)
 
-    def insert(self, table: str, payload: dict[str, Any] | list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def insert(
+        self,
+        table: str,
+        payload: dict[str, Any] | list[dict[str, Any]],
+        *,
+        return_rows: bool = True,
+    ) -> list[dict[str, Any]]:
         return self.request(
             "POST",
             table,
             json=payload,
-            headers={"Prefer": "return=representation"},
+            headers={"Prefer": "return=representation" if return_rows else "return=minimal"},
         )
 
     def upsert(
@@ -74,13 +80,19 @@ class SupabaseRestClient:
         table: str,
         payload: dict[str, Any] | list[dict[str, Any]],
         on_conflict: str,
+        *,
+        return_rows: bool = True,
     ) -> list[dict[str, Any]]:
         return self.request(
             "POST",
             table,
             params={"on_conflict": on_conflict},
             json=payload,
-            headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+            headers={
+                "Prefer": "resolution=merge-duplicates,return=representation"
+                if return_rows
+                else "resolution=merge-duplicates,return=minimal"
+            },
         )
 
     def update(
@@ -88,13 +100,15 @@ class SupabaseRestClient:
         table: str,
         payload: dict[str, Any],
         params: dict[str, Any],
+        *,
+        return_rows: bool = True,
     ) -> list[dict[str, Any]]:
         return self.request(
             "PATCH",
             table,
             params=params,
             json=payload,
-            headers={"Prefer": "return=representation"},
+            headers={"Prefer": "return=representation" if return_rows else "return=minimal"},
         )
 
     def delete(self, table: str, params: dict[str, Any]) -> list[dict[str, Any]]:

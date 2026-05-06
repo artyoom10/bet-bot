@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from traceback import format_exception
 from typing import Any
 
-from lib.config import SPORT_KEYS
+from lib.config import SPORT_KEYS, env
 from lib.errors import AppError
 from lib.odds_api import fetch_event_markets, fetch_event_odds, fetch_events_for_sport, fetch_odds_for_sport, refresh_usage as fetch_usage
 from lib.supabase_client import SupabaseRestClient
@@ -13,6 +13,7 @@ from lib.users import first
 
 
 SYNC_STALE_AFTER_MINUTES = 3
+DEFAULT_SYNC_BOOKMAKER_KEYS = ("pinnacle", "onexbet", "marathonbet")
 
 
 SPORT_TITLES = {
@@ -44,6 +45,33 @@ SPORT_TITLES = {
 }
 
 
+def sync_bookmaker_keys() -> list[str]:
+    raw = env("ODDS_SYNC_BOOKMAKER_KEYS", ",".join(DEFAULT_SYNC_BOOKMAKER_KEYS))
+    if raw.lower() == "all":
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def filter_bookmakers(bookmakers: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
+    keys = sync_bookmaker_keys()
+    if not keys:
+        return bookmakers, "all"
+
+    selected = [bookmaker for bookmaker in bookmakers if bookmaker.get("key") in keys]
+    if selected:
+        return selected, ",".join(keys)
+
+    fallback_count = min(3, len(bookmakers))
+    return bookmakers[:fallback_count], f"fallback_first_{fallback_count}"
+
+
+def unique_rows(rows: list[dict[str, Any]], key_fields: tuple[str, ...]) -> list[dict[str, Any]]:
+    result: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for row in rows:
+        result[tuple(row.get(field) for field in key_fields)] = row
+    return list(result.values())
+
+
 def run_odds_sync(
     db: SupabaseRestClient,
     *,
@@ -67,11 +95,13 @@ def run_odds_sync(
     if active:
         raise AppError("sync_already_running", "Синхронизация уже запущена. Подождите несколько минут.", 409)
 
+    selected_sports = sport_keys or SPORT_KEYS
     sync_run = first(
         db.insert(
             "sync_runs",
             {
                 "status": "started",
+                "sport_key": selected_sports[0] if len(selected_sports) == 1 else None,
                 "triggered_by": triggered_by,
                 "triggered_by_user_id": admin_user.get("id") if admin_user else None,
             },
@@ -80,7 +110,6 @@ def run_odds_sync(
     if not sync_run:
         raise AppError("sync_run_create_failed", "Could not create sync run", 500)
 
-    selected_sports = sport_keys or SPORT_KEYS
     totals = {
         "sports_count": len(selected_sports),
         "success_sports": 0,
@@ -201,6 +230,11 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
         "odds_count": 0,
         "bookmakers_count": 0,
         "snapshots_count": 0,
+        "snapshots_note": "disabled_for_fast_sync",
+        "source_bookmakers_count": 0,
+        "processed_bookmakers_count": 0,
+        "skipped_bookmakers_count": 0,
+        "bookmaker_filter": ",".join(sync_bookmaker_keys()) or "all",
         "events_without_h2h": 0,
         "events_without_odds": 0,
         "markets_requested": ["h2h", "spreads", "totals"],
@@ -253,12 +287,19 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
             counts["events_count"] += 1
             saved_event_external_ids.add(source_event.get("id"))
         event_h2h_count = 0
-        for bookmaker in source_event.get("bookmakers", []):
+        source_bookmakers = source_event.get("bookmakers", [])
+        bookmakers, filter_label = filter_bookmakers(source_bookmakers)
+        counts["source_bookmakers_count"] += len(source_bookmakers)
+        counts["processed_bookmakers_count"] += len(bookmakers)
+        counts["skipped_bookmakers_count"] += max(0, len(source_bookmakers) - len(bookmakers))
+        counts["bookmaker_filter"] = filter_label
+
+        bookmaker_rows: list[dict[str, Any]] = []
+        odds_rows: list[dict[str, Any]] = []
+        for bookmaker in bookmakers:
             bookmaker_key = bookmaker["key"]
-            db.upsert(
-                "bookmakers",
-                {"bookmaker_key": bookmaker_key, "title": bookmaker.get("title") or bookmaker_key, "updated_at": now},
-                "bookmaker_key",
+            bookmaker_rows.append(
+                {"bookmaker_key": bookmaker_key, "title": bookmaker.get("title") or bookmaker_key, "updated_at": now}
             )
             counts["bookmakers_count"] += 1
 
@@ -283,48 +324,35 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
                     if not odd_payload:
                         continue
 
-                    old = first(
-                        db.select(
-                            "odds_current",
-                            {
-                                "select": "*",
-                                "event_id": f"eq.{event['id']}",
-                                "bookmaker_key": f"eq.{bookmaker_key}",
-                                "market_key": f"eq.{odd_payload['market_key']}",
-                                "selection_key": f"eq.{odd_payload['selection_key']}",
-                                "limit": "1",
-                            },
-                        )
-                    )
                     odd_payload["api_last_update"] = market.get("last_update") or bookmaker.get("last_update")
-                    db.upsert("odds_current", odd_payload, "event_id,bookmaker_key,market_key,selection_key")
+                    odds_rows.append(odd_payload)
                     counts["odds_count"] += 1
                     if odd_payload["market_key"] == "h2h":
                         event_h2h_count += 1
                         h2h_prices[odd_payload["selection_key"]] = float(odd_payload["price"])
                         h2h_names[odd_payload["selection_key"]] = odd_payload["selection_name_ru"]
 
-                    if not old or float(old["price"]) != float(odd_payload["price"]):
-                        db.insert(
-                            "odds_snapshots",
-                            {
-                                "event_id": event["id"],
-                                "bookmaker_key": bookmaker_key,
-                                "market_key": odd_payload["market_key"],
-                                "selection_key": odd_payload["selection_key"],
-                                "selection_name_raw": odd_payload["selection_name_raw"],
-                                "price": odd_payload["price"],
-                                "api_last_update": odd_payload["api_last_update"],
-                            },
-                        )
-                        counts["snapshots_count"] += 1
-
             if sport_key.startswith("soccer_") and "double_chance" not in market_keys_seen:
                 derived_rows = derived_double_chance_rows(event["id"], bookmaker_key, h2h_prices, h2h_names, now)
                 for row in derived_rows:
-                    db.upsert("odds_current", row, "event_id,bookmaker_key,market_key,selection_key")
+                    odds_rows.append(row)
                     counts["odds_count"] += 1
                     counts["double_chance_derived_count"] += 1
+
+        if bookmaker_rows:
+            db.upsert(
+                "bookmakers",
+                unique_rows(bookmaker_rows, ("bookmaker_key",)),
+                "bookmaker_key",
+                return_rows=False,
+            )
+        if odds_rows:
+            db.upsert(
+                "odds_current",
+                unique_rows(odds_rows, ("event_id", "bookmaker_key", "market_key", "selection_key")),
+                "event_id,bookmaker_key,market_key,selection_key",
+                return_rows=False,
+            )
 
         if event_h2h_count == 0:
             counts["events_without_h2h"] += 1
@@ -370,6 +398,11 @@ def sync_event_markets(
         "odds_count": 0,
         "bookmakers_count": 0,
         "snapshots_count": 0,
+        "snapshots_note": "disabled_for_fast_sync",
+        "source_bookmakers_count": 0,
+        "processed_bookmakers_count": 0,
+        "skipped_bookmakers_count": 0,
+        "bookmaker_filter": ",".join(sync_bookmaker_keys()) or "all",
         "quota_last_total": market_result.get("quota_last") or 0,
         "quota_remaining": market_result.get("quota_remaining"),
         "quota_used": market_result.get("quota_used"),
@@ -418,12 +451,19 @@ def process_event_odds_payload(
     now: str,
     counts: dict[str, Any],
 ) -> None:
-    for bookmaker in source_event.get("bookmakers", []):
+    source_bookmakers = source_event.get("bookmakers", [])
+    bookmakers, filter_label = filter_bookmakers(source_bookmakers)
+    counts["source_bookmakers_count"] = counts.get("source_bookmakers_count", 0) + len(source_bookmakers)
+    counts["processed_bookmakers_count"] = counts.get("processed_bookmakers_count", 0) + len(bookmakers)
+    counts["skipped_bookmakers_count"] = counts.get("skipped_bookmakers_count", 0) + max(0, len(source_bookmakers) - len(bookmakers))
+    counts["bookmaker_filter"] = filter_label
+
+    bookmaker_rows: list[dict[str, Any]] = []
+    odds_rows: list[dict[str, Any]] = []
+    for bookmaker in bookmakers:
         bookmaker_key = bookmaker["key"]
-        db.upsert(
-            "bookmakers",
-            {"bookmaker_key": bookmaker_key, "title": bookmaker.get("title") or bookmaker_key, "updated_at": now},
-            "bookmaker_key",
+        bookmaker_rows.append(
+            {"bookmaker_key": bookmaker_key, "title": bookmaker.get("title") or bookmaker_key, "updated_at": now}
         )
         counts["bookmakers_count"] += 1
         for market in bookmaker.get("markets", []):
@@ -445,36 +485,24 @@ def process_event_odds_payload(
                 if not odd_payload:
                     continue
 
-                old = first(
-                    db.select(
-                        "odds_current",
-                        {
-                            "select": "*",
-                            "event_id": f"eq.{event['id']}",
-                            "bookmaker_key": f"eq.{bookmaker_key}",
-                            "market_key": f"eq.{odd_payload['market_key']}",
-                            "selection_key": f"eq.{odd_payload['selection_key']}",
-                            "limit": "1",
-                        },
-                    )
-                )
                 odd_payload["api_last_update"] = market.get("last_update") or bookmaker.get("last_update")
-                db.upsert("odds_current", odd_payload, "event_id,bookmaker_key,market_key,selection_key")
+                odds_rows.append(odd_payload)
                 counts["odds_count"] += 1
-                if not old or float(old["price"]) != float(odd_payload["price"]):
-                    db.insert(
-                        "odds_snapshots",
-                        {
-                            "event_id": event["id"],
-                            "bookmaker_key": bookmaker_key,
-                            "market_key": odd_payload["market_key"],
-                            "selection_key": odd_payload["selection_key"],
-                            "selection_name_raw": odd_payload["selection_name_raw"],
-                            "price": odd_payload["price"],
-                            "api_last_update": odd_payload["api_last_update"],
-                        },
-                    )
-                    counts["snapshots_count"] += 1
+
+    if bookmaker_rows:
+        db.upsert(
+            "bookmakers",
+            unique_rows(bookmaker_rows, ("bookmaker_key",)),
+            "bookmaker_key",
+            return_rows=False,
+        )
+    if odds_rows:
+        db.upsert(
+            "odds_current",
+            unique_rows(odds_rows, ("event_id", "bookmaker_key", "market_key", "selection_key")),
+            "event_id,bookmaker_key,market_key,selection_key",
+            return_rows=False,
+        )
 
 
 def supported_event_market(market_key: str | None) -> bool:
@@ -552,7 +580,7 @@ def ensure_sports_seed(db: SupabaseRestClient, sport_keys: list[str]) -> None:
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
         )
-    db.upsert("sports", rows, "sport_key")
+    db.upsert("sports", rows, "sport_key", return_rows=False)
 
 
 def mark_stale_syncs(db: SupabaseRestClient) -> None:

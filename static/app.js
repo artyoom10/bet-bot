@@ -12,6 +12,7 @@ const state = {
   bets: [],
   users: [],
   adminBets: [],
+  adminSelectedUserId: '',
   aliases: null,
   teamAliasRows: [],
   manualData: { sports: [], teams: [], events: [] },
@@ -138,7 +139,7 @@ function updateLoading(text) {
   document.querySelector('#loading-text').textContent = text;
 }
 
-function showLoadingSuccess(title = 'Готово', text = 'Операция выполнена.') {
+function showLoadingSuccess(title = 'Готово', text = '') {
   showLoading(title, text);
   const modal = document.querySelector('#loading-modal');
   modal.classList.add('success');
@@ -146,11 +147,12 @@ function showLoadingSuccess(title = 'Готово', text = 'Операция в�
   const confetti = document.createElement('div');
   confetti.className = 'loading-confetti';
   const colors = ['#2f80ed', '#16a36a', '#f3b51f', '#9cc8ff'];
-  for (let index = 0; index < 18; index += 1) {
+  for (let index = 0; index < 30; index += 1) {
     const piece = document.createElement('span');
-    piece.style.setProperty('--x', `${Math.round((Math.random() * 180) - 90)}px`);
+    piece.style.setProperty('--x', `${Math.round((Math.random() * 220) - 110)}px`);
+    piece.style.setProperty('--y', `${Math.round(70 + (Math.random() * 90))}px`);
     piece.style.setProperty('--r', `${Math.round((Math.random() * 360) - 180)}deg`);
-    piece.style.setProperty('--delay', `${Math.random() * 160}ms`);
+    piece.style.setProperty('--delay', `${Math.random() * 260}ms`);
     piece.style.setProperty('--confetti-color', colors[index % colors.length]);
     confetti.appendChild(piece);
   }
@@ -174,11 +176,26 @@ function showBlockedScreen(reason) {
   welcomeMessageTimer = null;
   document.querySelector('.page').hidden = true;
   document.querySelector('#bet-slip').hidden = true;
+  document.querySelector('.bottom-nav').hidden = true;
   document.querySelector('#admin-drawer').classList.remove('open');
   document.querySelector('#admin-backdrop').hidden = true;
   document.querySelector('#welcome-screen').hidden = true;
   document.querySelector('#blocked-reason').textContent = reason || 'Доступ к приложению временно ограничен.';
   document.querySelector('#blocked-screen').hidden = false;
+}
+
+function showClubDeniedScreen(message = 'Вы не являетесь членом данного клуба') {
+  window.clearInterval(welcomeMessageTimer);
+  welcomeMessageTimer = null;
+  document.querySelector('.page').hidden = true;
+  document.querySelector('.bottom-nav').hidden = true;
+  document.querySelector('#bet-slip').hidden = true;
+  document.querySelector('#admin-drawer').classList.remove('open');
+  document.querySelector('#admin-backdrop').hidden = true;
+  document.querySelector('#welcome-screen').hidden = true;
+  document.querySelector('#club-denied-text').textContent = message;
+  document.querySelector('#club-denied-screen').hidden = false;
+  lockBodyScroll('club-denied');
 }
 
 function prepareWelcome() {
@@ -274,6 +291,10 @@ async function apiFetch(path, options = {}) {
 
 async function init() {
   const canUseApp = await loadMe().catch((error) => {
+    if (error.status === 403 || error.data?.error === 'not_member') {
+      showClubDeniedScreen(error.data?.message || 'Вы не являетесь членом данного клуба');
+      return false;
+    }
     status(`Профиль не загружен: ${error.message}`);
     finishWelcome(telegramFallbackName() || 'Игрок');
     return false;
@@ -286,6 +307,10 @@ async function init() {
 
 async function loadMe() {
   const data = await apiFetch('/api/me');
+  if (data.access_denied) {
+    showClubDeniedScreen(data.message || 'Вы не являетесь членом данного клуба');
+    return false;
+  }
   state.me = data;
   const profileName = renderMe();
   setAdminVisibility(Boolean(data.user.is_admin));
@@ -311,14 +336,18 @@ async function refreshMe() {
   button?.classList.add('loading');
   try {
     await reloadMeSilently();
-    notify('Баланс обновлен', 'success');
   } finally {
     button?.classList.remove('loading');
   }
 }
 
 async function reloadMeSilently() {
-  state.me = await apiFetch('/api/me', { timeoutMs: 15000 });
+  const data = await apiFetch('/api/me', { timeoutMs: 15000 });
+  if (data.access_denied) {
+    showClubDeniedScreen(data.message || 'Вы не являетесь членом данного клуба');
+    return;
+  }
+  state.me = data;
   renderMe();
   setAdminVisibility(Boolean(state.me.user.is_admin));
 }
@@ -425,13 +454,16 @@ function renderEvents() {
     root.innerHTML = `<article class="empty-state">Нет prematch-событий для ${escapeHtml(sport)}. Если матчи есть в Odds API, проверьте регионы и подробный debug синхронизации.</article>`;
     return;
   }
-  const groups = groupBy(state.events, (event) => event.league_title);
-  root.innerHTML = Object.entries(groups).map(([league, events]) => `
+  const groups = groupBy(state.events, (event) => event.sport_key);
+  root.innerHTML = Object.entries(groups).map(([sportKey, events]) => {
+    const league = events[0]?.league_title || sportTitle(sportKey);
+    return `
     <details class="league-block" open>
-      <summary class="league-head"><strong>${escapeHtml(league)}</strong><span>${events.length}</span></summary>
+      <summary class="league-head">${leagueLogo(events[0])}<strong>${escapeHtml(league)}</strong><span>${events.length}</span></summary>
       ${events.map(renderEvent).join('')}
     </details>
-  `).join('');
+  `;
+  }).join('');
   document.querySelectorAll('[data-event]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -477,6 +509,13 @@ function teamLine(team) {
 function teamLogo(team) {
   if (!team?.logo_url) return `<span class="team-logo placeholder">${escapeHtml((team?.name || 'Ф')[0])}</span>`;
   return `<img class="team-logo" src="${escapeAttr(team.logo_url)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'team-logo placeholder', textContent: '${escapeAttr((team?.name || 'Ф')[0])}'}))">`;
+}
+
+function leagueLogo(event) {
+  if (event?.league_logo_url) {
+    return `<img class="league-logo" src="${escapeAttr(event.league_logo_url)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'league-logo placeholder'}))">`;
+  }
+  return `<span class="league-logo placeholder">${sportIcon(event?.sport_key || '', event?.league_title || '')}</span>`;
 }
 
 function marketTitleFor(marketKey, sportKey = '') {
@@ -741,8 +780,8 @@ async function submitBet() {
     tg?.HapticFeedback?.notificationOccurred('success');
     clearTicket();
     await loadBets();
-    showLoadingSuccess('Ставка принята', 'Купон добавлен в раздел Мои пари');
-    await delay(950);
+    showLoadingSuccess('Ставка принята');
+    await delay(1850);
   } finally {
     hideLoading();
   }
@@ -836,7 +875,7 @@ function renderBetSelection(selection) {
       <div class="selection-details">
         <span>${escapeHtml(marketTitleFor(selection.market_key))}</span>
         <strong>${escapeHtml(selectionDisplayName(selection, home, away))}</strong>
-        <em>${result.label}</em>
+        <em class="result-icon ${result.type}" title="${escapeAttr(result.label)}" aria-label="${escapeAttr(result.label)}">${resultIcon(result.type)}</em>
       </div>
     </article>
   `;
@@ -866,7 +905,7 @@ function selectionScore(selection) {
   if (selection.home_score === null || selection.home_score === undefined || selection.away_score === null || selection.away_score === undefined) {
     return '—';
   }
-  return `${selection.home_score}:${selection.away_score}`;
+  return `${selection.home_score}:${selection.away_score}${resultNoteSuffix(selection.result_note)}`;
 }
 
 function selectionResultView(selection) {
@@ -875,6 +914,19 @@ function selectionResultView(selection) {
   if (status === 'lost') return { type: 'loss', label: 'исход не прошёл' };
   if (status === 'refund') return { type: 'refund', label: 'возврат' };
   return { type: 'pending', label: selection.event_status === 'finished' ? 'ожидает расчёта' : 'матч не завершён' };
+}
+
+function resultIcon(type) {
+  if (type === 'win') return '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.2L19 7"/></svg>';
+  if (type === 'loss') return '<svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg>';
+  if (type === 'refund') return '<svg viewBox="0 0 24 24"><path d="M6 8h9a4 4 0 1 1 0 8H8"/><path d="M8 5 5 8l3 3"/></svg>';
+  return '<svg viewBox="0 0 24 24"><path d="M12 7v5l3 2"/><path d="M21 12a9 9 0 1 1-9-9"/></svg>';
+}
+
+function resultNoteSuffix(note) {
+  if (note === 'ot') return ' (ОТ)';
+  if (note === 'so') return ' (Б)';
+  return '';
 }
 
 function openProfileCard() {
@@ -1021,7 +1073,7 @@ async function syncOdds(singleSportKey = '') {
       try {
         const result = await apiFetch('/api/admin/sync-odds', {
           method: 'POST',
-          timeoutMs: 90000,
+          timeoutMs: 150000,
           body: JSON.stringify({ sport_keys: [sportKey] }),
         });
         responses.push({ sport_key: sportKey, sport_title: sportTitle(sportKey), ok: true, result });
@@ -1110,10 +1162,12 @@ function renderUsers() {
         <label>Баланс <input data-user-balance="${user.id}" type="number" min="0" step="10" value="${Number(wallet?.balance || 0)}"></label>
         <label class="checkbox-row"><input data-user-blocked="${user.id}" type="checkbox" ${user.is_blocked ? 'checked' : ''}> Заблокирован</label>
         <button class="primary" data-save-user="${user.id}">Сохранить</button>
+        <button class="back-button danger-button" data-delete-user="${user.id}" type="button">Удалить пользователя</button>
       </div>
     </article>
   `).join('');
   document.querySelectorAll('[data-save-user]').forEach((button) => button.addEventListener('click', () => saveUser(button.dataset.saveUser)));
+  document.querySelectorAll('[data-delete-user]').forEach((button) => button.addEventListener('click', () => deleteUser(button.dataset.deleteUser)));
 }
 
 async function saveUser(userId) {
@@ -1133,6 +1187,18 @@ async function saveUser(userId) {
     });
     notify('Пользователь обновлен', 'success');
     await loadUsers();
+  } finally {
+    hideLoading();
+  }
+}
+
+async function deleteUser(userId) {
+  if (!window.confirm('Удалить пользователя и все его данные?')) return;
+  showLoading('Пользователь', 'Удаляю пользователя...');
+  try {
+    await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+    await loadUsers();
+    if (state.adminBets.length) await loadAdminBets().catch(() => {});
   } finally {
     hideLoading();
   }
@@ -1175,29 +1241,106 @@ function renderAdminBets() {
     root.innerHTML = '<article class="empty-state">Ставок пока нет.</article>';
     return;
   }
-  root.innerHTML = state.adminBets.map(({ bet, user, selections }) => {
-    const name = user ? [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || user.tg_id : 'Пользователь не найден';
-    return `
-      <article class="admin-card bet-admin-card">
-        <div class="card-head">
-          <strong>${escapeHtml(name)}</strong>
-          <span>${formatDate(bet.created_at)}</span>
-        </div>
-        <div class="stat"><span>Тип</span><strong>${bet.bet_type === 'express' ? `Экспресс · ${selections.length}` : 'Ординар'}</strong></div>
-        <div class="stat"><span>Статус</span><strong>${escapeHtml(statusLabels[bet.status] || bet.status)}</strong></div>
-        <div class="stat"><span>Сумма</span><strong>${moneyHtml(bet.amount)}</strong></div>
-        <div class="stat"><span>Коэффициент</span><strong>${Number(bet.total_odds || 0).toFixed(2)}</strong></div>
-        <div class="stat"><span>Потенциально</span><strong>${moneyHtml(bet.possible_win)}</strong></div>
-        ${bet.payout !== null && bet.payout !== undefined ? `<div class="stat"><span>Выплата</span><strong>${moneyHtml(bet.payout)}</strong></div>` : ''}
-        <div class="selection-list">${(selections || []).map((selection) => `
-          <span>
-            <strong>${escapeHtml(selection.event_name_ru || 'Событие')}</strong>
-            <small>${escapeHtml(marketTitles[selection.market_key] || selection.market_key)} · ${escapeHtml(selection.selection_name_ru || selection.selection_name_raw)} · ${Number(selection.price || 0).toFixed(2)} · ${escapeHtml(statusLabels[selection.result_status] || selection.result_status || 'ожидает')}</small>
-          </span>
-        `).join('')}</div>
-      </article>
-    `;
-  }).join('');
+  const grouped = groupBy(state.adminBets, (row) => row.user?.id || 'unknown');
+  const users = Object.entries(grouped).map(([id, rows]) => ({ id, rows, user: rows[0].user }));
+  if (!state.adminSelectedUserId || !grouped[state.adminSelectedUserId]) {
+    root.innerHTML = users.map(({ id, rows, user }) => {
+      const name = adminUserName(user);
+      const latest = rows.slice().sort((a, b) => String(b.bet.created_at).localeCompare(String(a.bet.created_at)))[0];
+      const pending = rows.filter((row) => row.bet.status === 'pending').length;
+      return `
+        <button class="admin-user-bet-row" data-admin-user-bets="${escapeAttr(id)}" type="button">
+          <span><strong>${escapeHtml(name)}</strong><small>${rows.length} ставок · ожидает ${pending}</small></span>
+          <small>${formatDate(latest?.bet.created_at)}</small>
+        </button>
+      `;
+    }).join('');
+    root.querySelectorAll('[data-admin-user-bets]').forEach((button) => button.addEventListener('click', () => {
+      state.adminSelectedUserId = button.dataset.adminUserBets;
+      renderAdminBets();
+    }));
+    return;
+  }
+
+  const rows = grouped[state.adminSelectedUserId].slice().sort((a, b) => String(b.bet.created_at).localeCompare(String(a.bet.created_at)));
+  const user = rows[0]?.user;
+  root.innerHTML = `
+    <button class="plain-list-back" data-admin-bets-back type="button">Назад к пользователям</button>
+    <h3>${escapeHtml(adminUserName(user))}</h3>
+    ${rows.map(renderAdminBetCard).join('')}
+  `;
+  root.querySelector('[data-admin-bets-back]')?.addEventListener('click', () => {
+    state.adminSelectedUserId = '';
+    renderAdminBets();
+  });
+  root.querySelectorAll('[data-admin-settle-bet]').forEach((button) => button.addEventListener('click', () => settleAdminBet(button.dataset.adminSettleBet)));
+  root.querySelectorAll('[data-admin-delete-bet]').forEach((button) => button.addEventListener('click', () => deleteAdminBet(button.dataset.adminDeleteBet)));
+}
+
+function renderAdminBetCard({ bet, selections }) {
+  return `
+    <article class="admin-card bet-admin-card">
+      <div class="card-head">
+        <strong>${bet.bet_type === 'express' ? `Экспресс · ${selections.length}` : 'Ординар'}</strong>
+        <span>${formatDate(bet.created_at)}</span>
+      </div>
+      <div class="stat"><span>Статус</span><strong>${escapeHtml(statusLabels[bet.status] || bet.status)}</strong></div>
+      <div class="stat"><span>Сумма</span><strong>${moneyHtml(bet.amount)}</strong></div>
+      <div class="stat"><span>Итоговый кэф</span><strong>${Number(bet.total_odds || 0).toFixed(2)}</strong></div>
+      <div class="stat"><span>Возможный выигрыш</span><strong>${moneyHtml(bet.possible_win)}</strong></div>
+      ${bet.payout !== null && bet.payout !== undefined ? `<div class="stat"><span>Выплата</span><strong>${moneyHtml(bet.payout)}</strong></div>` : ''}
+      <div class="selection-list">${(selections || []).map((selection) => `
+        <span>
+          <strong>${escapeHtml(selection.event_name_ru || 'Событие')}</strong>
+          <small>${escapeHtml(marketTitles[selection.market_key] || selection.market_key)} · ${escapeHtml(selection.selection_name_ru || selection.selection_name_raw)} · ${escapeHtml(statusLabels[selection.result_status] || selection.result_status || 'ожидает')}</small>
+        </span>
+      `).join('')}</div>
+      <div class="form-grid admin-bet-actions">
+        <select data-admin-bet-status="${bet.id}" ${bet.status === 'pending' ? '' : 'disabled'}>
+          <option value="won">Выигрыш</option>
+          <option value="lost">Проигрыш</option>
+          <option value="refund">Возврат</option>
+          <option value="cancelled">Отменить</option>
+        </select>
+        <input data-admin-bet-payout="${bet.id}" type="number" min="0" step="0.01" value="${Number(bet.possible_win || 0).toFixed(2)}" ${bet.status === 'pending' ? '' : 'disabled'}>
+        <button class="primary" data-admin-settle-bet="${bet.id}" type="button" ${bet.status === 'pending' ? '' : 'disabled'}>Рассчитать</button>
+        <button class="back-button danger-button" data-admin-delete-bet="${bet.id}" type="button">Удалить</button>
+      </div>
+    </article>
+  `;
+}
+
+function adminUserName(user) {
+  return user ? [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || user.tg_id : 'Пользователь не найден';
+}
+
+async function settleAdminBet(betId) {
+  const statusValue = document.querySelector(`[data-admin-bet-status="${betId}"]`).value;
+  const payout = Number(document.querySelector(`[data-admin-bet-payout="${betId}"]`).value);
+  showLoading('Ставка', 'Рассчитываю ставку...');
+  try {
+    const result = await apiFetch(`/api/admin/bets/${betId}/manual-settlement`, {
+      method: 'POST',
+      body: JSON.stringify({ status: statusValue, payout }),
+    });
+    state.adminBets = result.bets || state.adminBets;
+    renderAdminBets();
+    await reloadMeSilently().catch(() => {});
+  } finally {
+    hideLoading();
+  }
+}
+
+async function deleteAdminBet(betId) {
+  if (!window.confirm('Удалить ставку? Если она ожидает расчёта, сумма ставки будет возвращена.')) return;
+  showLoading('Ставка', 'Удаляю ставку...');
+  try {
+    const result = await apiFetch(`/api/admin/bets/${betId}`, { method: 'DELETE' });
+    state.adminBets = result.bets || state.adminBets.filter((row) => row.bet.id !== betId);
+    renderAdminBets();
+  } finally {
+    hideLoading();
+  }
 }
 
 async function loadAllAdminEvents() {
@@ -1296,6 +1439,7 @@ function renderSportAliases(sports) {
       <div class="card-head"><strong>${escapeHtml(sport.title_ru || sport.title_en || sport.sport_key)}</strong><span>${sport.is_enabled ? 'активен' : 'выключен'}</span></div>
       <div class="form-grid">
         <input data-sport-title="${sport.sport_key}" value="${escapeAttr(sport.title_ru || '')}" placeholder="Название на русском">
+        <input data-sport-logo="${sport.sport_key}" value="${escapeAttr(sport.logo_url || '')}" placeholder="Logo URL турнира">
         <button class="primary" data-save-sport="${sport.sport_key}">Сохранить</button>
         ${sport.source === 'manual' ? `<button class="back-button danger-button" data-delete-sport="${escapeAttr(sport.sport_key)}" type="button">Удалить соревнование</button>` : ''}
       </div>
@@ -1356,11 +1500,15 @@ async function createAlias(index) {
 async function saveSport(sportKey) {
   await apiFetch(`/api/admin/sports/${encodeURIComponent(sportKey)}`, {
     method: 'PATCH',
-    body: JSON.stringify({ title_ru: document.querySelector(`[data-sport-title="${sportKey}"]`).value }),
+    body: JSON.stringify({
+      title_ru: document.querySelector(`[data-sport-title="${sportKey}"]`).value,
+      logo_url: document.querySelector(`[data-sport-logo="${sportKey}"]`).value,
+    }),
   });
   status('Турнир обновлен');
   await loadAliases();
   await loadSports();
+  await loadEvents();
 }
 
 async function saveTeam(index) {
@@ -1456,23 +1604,6 @@ function renderManualConstructor() {
   homeSelect.innerHTML = teamOptions;
   awaySelect.innerHTML = teamOptions;
   setManualWizardStep(state.manualStep || 1);
-
-  const manualSportsRoot = document.querySelector('#manual-sports-list');
-  const manualSports = state.manualData.sports.filter((sport) => sport.source === 'manual' && manualSportMatches(sport, sportType));
-  if (manualSportsRoot) {
-    manualSportsRoot.innerHTML = manualSports.length ? manualSports.map((sport) => `
-      <article class="admin-card">
-        <div class="card-head">
-          <strong>${escapeHtml(sport.title_ru || sport.title_en || sport.sport_key)}</strong>
-          <span>${escapeHtml(sportTypeLabels[sport.group_name] || sport.group_name || 'спорт')}</span>
-        </div>
-        <div class="admin-actions">
-          <button class="back-button danger-button" data-manual-sport-delete="${escapeAttr(sport.sport_key)}" type="button">Удалить соревнование</button>
-        </div>
-      </article>
-    `).join('') : '<p class="muted">Ручных соревнований для выбранного спорта пока нет.</p>';
-    document.querySelectorAll('[data-manual-sport-delete]').forEach((button) => button.addEventListener('click', () => deleteManualSport(button.dataset.manualSportDelete)));
-  }
 
   const list = document.querySelector('#manual-events-list');
   list.innerHTML = state.manualData.events.length ? state.manualData.events.map((event) => `
@@ -1697,9 +1828,10 @@ async function settleManualListEvent(eventId) {
   }
   showLoading('Ручной расчёт', 'Сохраняю результат...');
   try {
+    const note = document.querySelector(`[data-manual-result-note="${eventId}"]`)?.value || '';
     const result = await apiFetch(`/api/admin/events/${eventId}/manual-result`, {
       method: 'POST',
-      body: JSON.stringify({ home_score: home, away_score: away }),
+      body: JSON.stringify({ home_score: home, away_score: away, result_note: note }),
     });
     notify(`Рассчитано ставок: ${result.result.bets_settled}`, 'success');
     await loadManualConstructor();
@@ -1727,11 +1859,12 @@ async function manualSettle() {
   const eventId = document.querySelector('#manual-event').value;
   const home = Number(document.querySelector('#manual-home-score').value);
   const away = Number(document.querySelector('#manual-away-score').value);
+  const resultNote = document.querySelector('#manual-result-note').value;
   showLoading('Ручной расчёт', 'Сохраняю результат...');
   try {
     const result = await apiFetch(`/api/admin/events/${eventId}/manual-result`, {
       method: 'POST',
-      body: JSON.stringify({ home_score: home, away_score: away }),
+      body: JSON.stringify({ home_score: home, away_score: away, result_note: resultNote }),
     });
     notify(`Рассчитано ставок: ${result.result.bets_settled}`, 'success');
     await loadSettlementRuns();

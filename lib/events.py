@@ -110,6 +110,7 @@ def get_events_for_app(db: SupabaseRestClient, sport_key: str | None = None) -> 
                 "id": event["id"],
                 "sport_key": event["sport_key"],
                 "league_title": sports.get(event["sport_key"], {}).get("title_ru") or sports.get(event["sport_key"], {}).get("title_en") or event["sport_key"],
+                "league_logo_url": sports.get(event["sport_key"], {}).get("logo_url") or None,
                 "home_team": format_team(home_team, event["home_team_raw"]),
                 "away_team": format_team(away_team, event["away_team_raw"]),
                 "commence_time": event["commence_time"],
@@ -159,6 +160,7 @@ def get_sports_for_app(db: SupabaseRestClient) -> list[dict[str, Any]]:
         {
             "sport_key": sport["sport_key"],
             "title": sport.get("title_ru") or sport.get("title_en") or sport["sport_key"],
+            "logo_url": sport.get("logo_url") or None,
             "events_count": counts.get(sport["sport_key"], 0),
         }
         for sport in sports

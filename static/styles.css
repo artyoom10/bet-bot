@@ -19,7 +19,9 @@
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 [hidden], .admin-only[hidden], .bottom-nav .tab[hidden] { display: none !important; }
 html, body { width: 100%; max-width: 100%; overflow-x: hidden; }
-body.no-scroll { overflow: hidden; overscroll-behavior: none; }
+body.no-scroll { overflow: hidden; overscroll-behavior: none; touch-action: none; }
+body.no-scroll .page, body.no-scroll .bottom-nav { pointer-events: none; }
+body.no-scroll .modal, body.no-scroll .loading-modal, body.no-scroll .notice-modal, body.no-scroll .blocked-screen, body.no-scroll .club-denied-screen, body.no-scroll .event-modal, body.no-scroll .profile-modal, body.no-scroll .admin-drawer, body.no-scroll .bet-slip { pointer-events: auto; touch-action: auto; }
 body {
   margin: 0;
   min-width: 320px;
@@ -246,8 +248,21 @@ h3 { margin: 0; font-size: 15px; }
 .league-block { overflow: hidden; }
 .league-block summary { list-style: none; cursor: pointer; }
 .league-block summary::-webkit-details-marker { display: none; }
-.league-head { display: grid; grid-template-columns: minmax(0, 1fr) 26px 14px; gap: 8px; align-items: center; padding: 11px 14px; color: var(--muted); background: var(--surface-2); font-weight: 800; }
+.league-head { display: grid; grid-template-columns: 28px minmax(0, 1fr) 26px 14px; gap: 8px; align-items: center; padding: 11px 14px; color: var(--muted); background: var(--surface-2); font-weight: 800; }
 .league-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.league-logo {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  object-fit: contain;
+  padding: 3px;
+  color: var(--accent-2);
+  background: #fff;
+}
+.league-logo svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .league-head span {
   display: grid;
   place-items: center;
@@ -406,6 +421,15 @@ h3 { margin: 0; font-size: 15px; }
 .selection-details span { color: var(--muted); }
 .selection-details strong { color: var(--text); }
 .selection-details em { margin-left: auto; font-style: normal; font-weight: 850; }
+.result-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #fff;
+}
+.result-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .selection-card.win .selection-details em { color: var(--success); }
 .selection-card.loss .selection-details em { color: var(--danger); }
 .selection-card.refund .selection-details em, .selection-card.pending .selection-details em { color: var(--accent-2); }
@@ -505,7 +529,7 @@ h3 { margin: 0; font-size: 15px; }
 .stake-presets button.active { border-color: #101828; color: #fff; background: #101828; }
 
 .drawer-backdrop { display: none; }
-.drawer-backdrop[hidden], .modal[hidden], .loading-modal[hidden], .notice-modal[hidden], .blocked-screen[hidden], .event-modal[hidden], .profile-modal[hidden], .welcome-screen[hidden] { display: none; }
+.drawer-backdrop[hidden], .modal[hidden], .loading-modal[hidden], .notice-modal[hidden], .blocked-screen[hidden], .club-denied-screen[hidden], .event-modal[hidden], .profile-modal[hidden], .welcome-screen[hidden] { display: none; }
 .admin-drawer {
   position: fixed;
   inset: 0;
@@ -623,6 +647,26 @@ h3 { margin: 0; font-size: 15px; }
   font-weight: 650;
   line-height: 1.25;
 }
+.admin-user-bet-row, .plain-list-back {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 13px 14px;
+  color: var(--text);
+  background: rgba(255, 255, 255, .92);
+  text-align: left;
+}
+.admin-user-bet-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.admin-user-bet-row span { display: grid; gap: 3px; min-width: 0; }
+.admin-user-bet-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-user-bet-row small, .plain-list-back { color: var(--muted); font-size: 12px; font-weight: 800; }
+.plain-list-back { justify-self: start; width: auto; border: 0; background: transparent; padding: 6px 0; color: var(--accent-2); }
+.admin-bet-actions { margin-top: 4px; }
 .back-button { margin-bottom: 10px; border-radius: 999px; padding-inline: 15px; font-weight: 850; }
 .admin-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-bottom: 10px; }
 .sync-sports-list {
@@ -773,7 +817,7 @@ h3 { margin: 0; font-size: 15px; }
   word-break: break-word;
 }
 
-.modal, .loading-modal, .blocked-screen, .event-modal, .profile-modal, .welcome-screen {
+.modal, .loading-modal, .blocked-screen, .club-denied-screen, .event-modal, .profile-modal, .welcome-screen {
   position: fixed;
   inset: 0;
   z-index: 20;
@@ -795,7 +839,7 @@ h3 { margin: 0; font-size: 15px; }
   animation: welcomeIn 420ms ease both;
 }
 .welcome-screen.hidden { animation: welcomeOut 360ms ease both; pointer-events: none; }
-.modal-body, .loading-card, .blocked-card, .event-card, .profile-card, .welcome-card {
+.modal-body, .loading-card, .blocked-card, .club-denied-card, .event-card, .profile-card, .welcome-card {
   display: grid;
   gap: 12px;
   width: min(430px, 100%);
@@ -806,8 +850,21 @@ h3 { margin: 0; font-size: 15px; }
   box-shadow: var(--shadow);
 }
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.loading-card, .blocked-card, .welcome-card { justify-items: center; text-align: center; }
+.loading-card, .blocked-card, .club-denied-card, .welcome-card { justify-items: center; text-align: center; }
 .loading-card p, .blocked-card p { margin-bottom: 0; color: var(--muted); }
+.loading-card p:empty { display: none; }
+.club-denied-card { max-width: 360px; gap: 16px; }
+.club-denied-card h2 { margin-bottom: 0; line-height: 1.25; }
+.club-denied-icon {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  border-radius: 24px;
+  color: var(--danger);
+  background: #fff0f0;
+}
+.club-denied-icon svg { width: 38px; height: 38px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .welcome-card {
   position: relative;
   z-index: 1;
@@ -949,14 +1006,14 @@ h3 { margin: 0; font-size: 15px; }
 .loading-confetti span {
   position: absolute;
   left: 50%;
-  top: 42px;
+  top: 64px;
   width: 7px;
   height: 12px;
   border-radius: 3px;
   background: var(--confetti-color);
   opacity: 0;
   transform: translate(-50%, 0) rotate(0);
-  animation: confettiBurst 860ms ease-out var(--delay) both;
+  animation: confettiBurst 1280ms cubic-bezier(.12, .76, .2, 1) var(--delay) both;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes successPop {
@@ -966,7 +1023,7 @@ h3 { margin: 0; font-size: 15px; }
 @keyframes confettiBurst {
   0% { opacity: 0; transform: translate(-50%, 0) rotate(0); }
   16% { opacity: 1; }
-  100% { opacity: 0; transform: translate(calc(-50% + var(--x)), 92px) rotate(var(--r)); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--x)), calc(-1 * var(--y))) rotate(var(--r)); }
 }
 @keyframes welcomeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes welcomeOut {

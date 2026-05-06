@@ -282,6 +282,11 @@
             <select id="manual-event"></select>
             <input id="manual-home-score" type="number" min="0" placeholder="Счёт хозяев">
             <input id="manual-away-score" type="number" min="0" placeholder="Счёт гостей">
+            <select id="manual-result-note">
+              <option value="">Без отметки</option>
+              <option value="ot">Овертайм</option>
+              <option value="so">Буллиты</option>
+            </select>
             <button class="primary" id="manual-settle">Рассчитать вручную</button>
           </div>
         </article>
@@ -398,10 +403,6 @@
           </form>
         </article>
         <article class="panel">
-          <h2>Ручные соревнования</h2>
-          <div id="manual-sports-list" class="stack"></div>
-        </article>
-        <article class="panel">
           <h2>Созданные события</h2>
           <div id="manual-events-list" class="stack"></div>
         </article>
@@ -444,6 +445,15 @@
       <div class="blocked-card">
         <h2>Аккаунт заблокирован</h2>
         <p id="blocked-reason">Доступ к приложению временно ограничен.</p>
+      </div>
+    </div>
+
+    <div class="club-denied-screen" id="club-denied-screen" hidden>
+      <div class="club-denied-card">
+        <div class="club-denied-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 3l7 4v5c0 4.6-2.9 7.8-7 9-4.1-1.2-7-4.4-7-9V7l7-4Z"/><path d="M9 9l6 6M15 9l-6 6"/></svg>
+        </div>
+        <h2 id="club-denied-text">Вы не являетесь членом данного клуба</h2>
       </div>
     </div>
 

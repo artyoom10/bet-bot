@@ -147,12 +147,14 @@ def manual_result_and_settle(
     event_id: str,
     home_score: int,
     away_score: int,
+    result_note: str | None = None,
 ) -> dict[str, Any]:
     event = first(db.select("events", {"select": "*", "id": f"eq.{event_id}", "limit": "1"}))
     if not event:
         raise AppError("event_not_found", "Event not found", 404)
 
     winner = result_winner(home_score, away_score)
+    note = clean_result_note(result_note)
     updated = first(
         db.update(
             "events",
@@ -160,7 +162,8 @@ def manual_result_and_settle(
                 "home_score": home_score,
                 "away_score": away_score,
                 "result_winner": winner,
-                "result_payload": {"manual": True, "admin_tg_id": admin_user.get("tg_id")},
+                "result_note": note,
+                "result_payload": {"manual": True, "admin_tg_id": admin_user.get("tg_id"), "result_note": note},
                 "result_last_update": now_iso(),
                 "settled_at": now_iso(),
                 "status": "finished",
@@ -199,6 +202,7 @@ def update_event_result_from_score(db: SupabaseRestClient, sport_key: str, score
                 "home_score": home_score,
                 "away_score": away_score,
                 "result_winner": winner,
+                "result_note": infer_result_note(score_event),
                 "result_payload": score_event,
                 "result_last_update": now_iso(),
                 "settled_at": now_iso(),
@@ -400,6 +404,22 @@ def result_winner(home_score: int, away_score: int) -> str:
     if home_score < away_score:
         return "away_win"
     return "draw"
+
+
+def clean_result_note(value: str | None) -> str | None:
+    note = str(value or "").strip().lower()
+    if note in {"ot", "overtime", "овертайм", "от"}:
+        return "ot"
+    if note in {"so", "shootout", "буллиты", "б"}:
+        return "so"
+    if note in {"regulation", "regular", "main", "основное"}:
+        return "regular"
+    return None
+
+
+def infer_result_note(score_event: dict[str, Any]) -> str | None:
+    value = str(score_event.get("result_note") or score_event.get("period") or score_event.get("end_period") or "").lower()
+    return clean_result_note(value)
 
 
 def now_iso() -> str:

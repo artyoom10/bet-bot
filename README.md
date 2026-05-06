@@ -15,6 +15,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 ODDS_API_KEY=
 ODDS_API_REGIONS=eu
 ODDS_API_HOCKEY_REGIONS=us,eu
+ODDS_SYNC_BOOKMAKER_KEYS=pinnacle,onexbet,marathonbet
 ADMIN_TELEGRAM_IDS=
 DEBUG_ADMIN=0
 ```
@@ -22,6 +23,7 @@ DEBUG_ADMIN=0
 `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, and `ODDS_API_KEY` are backend-only secrets.
 `ODDS_API_REGIONS` can be expanded, for example `eu,uk`, if a league has events but no odds in the current region.
 `ODDS_API_HOCKEY_REGIONS` is optional and defaults to `us,eu`; NHL odds are often available in `us`, so hockey sync uses this value instead of the football region list.
+`ODDS_SYNC_BOOKMAKER_KEYS` limits how many bookmakers are processed during normal sync. Use `all` only if your Vercel function timeout and Supabase quota can handle the larger write volume.
 
 ## Supabase setup
 
@@ -34,9 +36,10 @@ For an existing database, also run:
 
 ```sql
 -- supabase/migrations/20260428_results_and_express.sql
+-- supabase/migrations/20260507_sport_logos_and_result_note.sql
 ```
 
-This adds result fields, payout fields, express settlement status, logo support, and `settlement_runs`.
+This adds result fields, payout fields, express settlement status, team/tournament logo support, hockey result notes, and `settlement_runs`.
 
 ## Admin endpoints
 
@@ -45,9 +48,12 @@ This adds result fields, payout fields, express settlement status, logo support,
 - `GET /api/admin/users`
 - `POST /api/admin/users`
 - `PATCH /api/admin/users/:id`
+- `DELETE /api/admin/users/:id`
 - `GET /api/admin/events`
 - `POST /api/admin/events/:id/fetch-markets`
 - `GET /api/admin/bets`
+- `POST /api/admin/bets/:id/manual-settlement`
+- `DELETE /api/admin/bets/:id`
 - `DELETE /api/admin/manual-sports/:sport_key`
 - `GET /api/admin/aliases`
 - `POST /api/admin/team-aliases`

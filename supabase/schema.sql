@@ -48,6 +48,7 @@ create table if not exists sports (
   title_en text not null,
   title_ru text,
   group_name text,
+  logo_url text,
   is_enabled boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -93,6 +94,7 @@ create table if not exists events (
   home_score integer,
   away_score integer,
   result_winner text,
+  result_note text,
   result_payload jsonb,
   result_last_update timestamptz,
   settled_at timestamptz,
