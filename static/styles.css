@@ -667,6 +667,8 @@ h3 { margin: 0; font-size: 15px; }
 .admin-user-bet-row small, .plain-list-back { color: var(--muted); font-size: 12px; font-weight: 800; }
 .plain-list-back { justify-self: start; width: auto; border: 0; background: transparent; padding: 6px 0; color: var(--accent-2); }
 .admin-bet-actions { margin-top: 4px; }
+.sport-alias-title { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
+.sport-alias-title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .back-button { margin-bottom: 10px; border-radius: 999px; padding-inline: 15px; font-weight: 850; }
 .admin-page-back {
   justify-self: end;

@@ -25,6 +25,7 @@ const state = {
   ticketExpanded: false,
   stake: 100,
   activeTab: 'events',
+  collapsedLeagues: new Set(),
   scrollLocks: new Set(),
   lockedScrollY: 0,
 };
@@ -476,13 +477,23 @@ function renderEvents() {
   const groups = groupBy(state.events, (event) => event.sport_key);
   root.innerHTML = Object.entries(groups).map(([sportKey, events]) => {
     const league = events[0]?.league_title || sportTitle(sportKey);
+    const isOpen = !state.collapsedLeagues.has(sportKey);
     return `
-    <details class="league-block" open>
+    <details class="league-block" data-league-key="${escapeAttr(sportKey)}" ${isOpen ? 'open' : ''}>
       <summary class="league-head">${leagueLogo(events[0])}<strong>${escapeHtml(league)}</strong><span>${events.length}</span></summary>
       ${events.map(renderEvent).join('')}
     </details>
   `;
   }).join('');
+  document.querySelectorAll('[data-league-key]').forEach((details) => {
+    details.addEventListener('toggle', () => {
+      if (details.open) {
+        state.collapsedLeagues.delete(details.dataset.leagueKey);
+      } else {
+        state.collapsedLeagues.add(details.dataset.leagueKey);
+      }
+    });
+  });
   document.querySelectorAll('[data-event]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -1491,7 +1502,10 @@ function renderUnknownAliases(unknown) {
 function renderSportAliases(sports) {
   document.querySelector('#sport-aliases').innerHTML = sports.length ? sports.map((sport) => `
     <article class="admin-card">
-      <div class="card-head"><strong>${escapeHtml(sport.title_ru || sport.title_en || sport.sport_key)}</strong><span>${sport.is_enabled ? 'активен' : 'выключен'}</span></div>
+      <div class="card-head">
+        <span class="sport-alias-title">${sportAliasLogo(sport)}<strong>${escapeHtml(sport.title_ru || sport.title_en || sport.sport_key)}</strong></span>
+        <span>${sport.is_enabled ? 'активен' : 'выключен'}</span>
+      </div>
       <div class="form-grid">
         <input data-sport-title="${sport.sport_key}" value="${escapeAttr(sport.title_ru || '')}" placeholder="Название на русском">
         <input data-sport-logo="${sport.sport_key}" value="${escapeAttr(sport.logo_url || '')}" placeholder="Logo URL турнира">
@@ -1502,6 +1516,13 @@ function renderSportAliases(sports) {
   `).join('') : '<p class="muted">Турниры появятся после sync.</p>';
   document.querySelectorAll('[data-save-sport]').forEach((button) => button.addEventListener('click', () => saveSport(button.dataset.saveSport)));
   document.querySelectorAll('[data-delete-sport]').forEach((button) => button.addEventListener('click', () => deleteManualSport(button.dataset.deleteSport)));
+}
+
+function sportAliasLogo(sport) {
+  if (sport?.logo_url) {
+    return `<img class="league-logo" src="${escapeAttr(sport.logo_url)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'league-logo placeholder'}))">`;
+  }
+  return `<span class="league-logo placeholder">${sportIcon(sport?.sport_key || '', sport?.title_ru || sport?.title_en || '')}</span>`;
 }
 
 function renderTeamAliases(teams) {
