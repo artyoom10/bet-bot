@@ -18,6 +18,12 @@ def odds_regions(sport_key: str | None = None) -> str:
     return env("ODDS_API_REGIONS", "eu")
 
 
+def odds_markets() -> str:
+    raw = env("ODDS_API_MARKETS", ",".join(ODDS_MARKETS))
+    markets = [item.strip() for item in raw.split(",") if item.strip()]
+    return ",".join(markets or ODDS_MARKETS)
+
+
 def masked_url(response: requests.Response, api_key: str) -> str:
     return response.url.replace(api_key, "***")
 
@@ -30,7 +36,7 @@ def fetch_odds_for_sport(sport_key: str) -> dict[str, Any]:
     params = {
         "apiKey": api_key,
         "regions": odds_regions(sport_key),
-        "markets": ",".join(ODDS_MARKETS),
+        "markets": odds_markets(),
         "oddsFormat": "decimal",
         "dateFormat": "iso",
     }

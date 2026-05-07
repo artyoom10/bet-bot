@@ -14,6 +14,7 @@ from lib.users import first
 
 SYNC_STALE_AFTER_MINUTES = 3
 DEFAULT_SYNC_BOOKMAKER_KEYS = ("pinnacle", "onexbet", "marathonbet")
+DEFAULT_SYNC_MAX_EVENTS = 40
 
 
 SPORT_TITLES = {
@@ -52,6 +53,15 @@ def sync_bookmaker_keys() -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def sync_max_events() -> int:
+    raw = env("ODDS_SYNC_MAX_EVENTS", str(DEFAULT_SYNC_MAX_EVENTS))
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_SYNC_MAX_EVENTS
+    return max(0, value)
+
+
 def filter_bookmakers(bookmakers: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
     keys = sync_bookmaker_keys()
     if not keys:
@@ -70,6 +80,23 @@ def unique_rows(rows: list[dict[str, Any]], key_fields: tuple[str, ...]) -> list
     for row in rows:
         result[tuple(row.get(field) for field in key_fields)] = row
     return list(result.values())
+
+
+def compact_sync_log(totals: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": totals.get("status"),
+        "selected_sports": totals.get("selected_sports"),
+        "events_count": totals.get("events_count"),
+        "odds_count": totals.get("odds_count"),
+        "bookmakers_count": totals.get("bookmakers_count"),
+        "quota_last_total": totals.get("quota_last_total"),
+        "quota_remaining": totals.get("quota_remaining"),
+        "quota_used": totals.get("quota_used"),
+        "errors": [
+            {"sport_key": error.get("sport_key"), "message": error.get("message"), "type": error.get("type")}
+            for error in totals.get("errors", [])
+        ],
+    }
 
 
 def run_odds_sync(
@@ -95,7 +122,7 @@ def run_odds_sync(
     if active:
         raise AppError("sync_already_running", "Синхронизация уже запущена. Подождите несколько минут.", 409)
 
-    selected_sports = sport_keys or SPORT_KEYS
+    selected_sports = list(dict.fromkeys(sport_keys or SPORT_KEYS))
     sync_run = first(
         db.insert(
             "sync_runs",
@@ -194,17 +221,18 @@ def run_odds_sync(
                     "finished_at": finished_at,
                 },
                 {"id": f"eq.{sync_run['id']}"},
+                return_rows=False,
             )
             totals["debug_steps"].append({"step": "sync_run_updated", "at": finished_at})
         except Exception as exc:
             status = "error"
             totals["errors"].append({"stage": "sync_run_update", **exception_debug(exc)})
 
+    totals["status"] = status
     latest = first(db.select("sync_runs", {"select": "*", "id": f"eq.{sync_run['id']}", "limit": "1"}))
     if admin_user:
-        log_admin_action(db, admin_user, "sync_odds", "sync_run", sync_run["id"], totals)
+        log_admin_action(db, admin_user, "sync_odds", "sync_run", sync_run["id"], compact_sync_log(totals))
 
-    totals["status"] = status
     totals["finished_at"] = latest.get("finished_at") if latest else finished_at
     totals["run"] = latest
     return totals
@@ -219,13 +247,18 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
         events_api_error = exception_debug(exc)
 
     api_result = fetch_odds_for_sport(sport_key)
-    events = api_result["data"]
-    plain_events = events_api_result["data"] if events_api_result else []
+    raw_events = api_result["data"]
+    raw_plain_events = events_api_result["data"] if events_api_result else []
+    events = limit_sync_events(raw_events)
+    plain_events = limit_sync_events(raw_plain_events)
 
     counts = {
-        "events_endpoint_count": len(plain_events),
-        "odds_endpoint_events_count": len(events),
+        "events_endpoint_count": len(raw_plain_events),
+        "events_endpoint_processed": len(plain_events),
+        "odds_endpoint_events_count": len(raw_events),
+        "odds_endpoint_processed": len(events),
         "api_events_count": len(events),
+        "max_events": sync_max_events() or "all",
         "events_count": 0,
         "odds_count": 0,
         "bookmakers_count": 0,
@@ -237,7 +270,7 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
         "bookmaker_filter": ",".join(sync_bookmaker_keys()) or "all",
         "events_without_h2h": 0,
         "events_without_odds": 0,
-        "markets_requested": ["h2h", "spreads", "totals"],
+        "markets_requested": str(api_result.get("markets") or "").split(","),
         "regions_requested": api_result.get("regions"),
         "double_chance_derived_count": 0,
         "quota_remaining": api_result.get("quota_remaining"),
@@ -250,17 +283,32 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
         "events_request_url": events_api_result.get("request_url") if events_api_result else None,
         "events_endpoint_error": events_api_error,
         "events_without_odds_samples": [],
+        "events_failed_to_save": 0,
+        "bulk_event_rows": 0,
+        "bulk_odds_chunks": 0,
     }
 
-    saved_event_external_ids = set()
     now = datetime.now(timezone.utc).isoformat()
+    team_by_raw = load_team_aliases_for_sport(db, sport_key)
     odds_event_ids = {source_event.get("id") for source_event in events}
+
+    source_events_by_id: dict[str, dict[str, Any]] = {}
+    for source_event in [*plain_events, *events]:
+        external_id = source_event.get("id")
+        if external_id:
+            source_events_by_id[external_id] = source_event
+
+    event_by_external_id = bulk_upsert_api_events(
+        db,
+        sport_key,
+        list(source_events_by_id.values()),
+        now,
+        team_by_raw,
+    )
+    counts["bulk_event_rows"] = len(event_by_external_id)
+    counts["events_count"] = len(event_by_external_id)
+
     for source_event in plain_events:
-        event = upsert_api_event(db, sport_key, source_event, now)
-        if not event:
-            continue
-        saved_event_external_ids.add(source_event.get("id"))
-        counts["events_count"] += 1
         if source_event.get("id") not in odds_event_ids:
             counts["events_without_odds"] += 1
             if len(counts["events_without_odds_samples"]) < 8:
@@ -273,19 +321,20 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
                     }
                 )
 
+    all_bookmaker_rows: list[dict[str, Any]] = []
+    all_odds_rows: list[dict[str, Any]] = []
     for source_event in events:
+        external_id = source_event.get("id")
         home_raw = source_event["home_team"]
         away_raw = source_event["away_team"]
-        home_team = find_team_by_raw_name(db, "odds_api", sport_key, home_raw)
-        away_team = find_team_by_raw_name(db, "odds_api", sport_key, away_raw)
+        home_team = team_by_raw.get(home_raw)
+        away_team = team_by_raw.get(away_raw)
 
-        event = upsert_api_event(db, sport_key, source_event, now, home_team=home_team, away_team=away_team)
+        event = event_by_external_id.get(external_id)
         if not event:
+            counts["events_failed_to_save"] += 1
             continue
 
-        if source_event.get("id") not in saved_event_external_ids:
-            counts["events_count"] += 1
-            saved_event_external_ids.add(source_event.get("id"))
         event_h2h_count = 0
         source_bookmakers = source_event.get("bookmakers", [])
         bookmakers, filter_label = filter_bookmakers(source_bookmakers)
@@ -340,22 +389,30 @@ def sync_single_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, Any]:
                     counts["double_chance_derived_count"] += 1
 
         if bookmaker_rows:
-            db.upsert(
-                "bookmakers",
-                unique_rows(bookmaker_rows, ("bookmaker_key",)),
-                "bookmaker_key",
-                return_rows=False,
-            )
+            all_bookmaker_rows.extend(bookmaker_rows)
         if odds_rows:
-            db.upsert(
-                "odds_current",
-                unique_rows(odds_rows, ("event_id", "bookmaker_key", "market_key", "selection_key")),
-                "event_id,bookmaker_key,market_key,selection_key",
-                return_rows=False,
-            )
+            all_odds_rows.extend(odds_rows)
 
         if event_h2h_count == 0:
             counts["events_without_h2h"] += 1
+
+    if all_bookmaker_rows:
+        db.upsert(
+            "bookmakers",
+            unique_rows(all_bookmaker_rows, ("bookmaker_key",)),
+            "bookmaker_key",
+            return_rows=False,
+        )
+    if all_odds_rows:
+        unique_odds_rows = unique_rows(all_odds_rows, ("event_id", "bookmaker_key", "market_key", "selection_key"))
+        for chunk in chunked(unique_odds_rows, 500):
+            db.upsert(
+                "odds_current",
+                chunk,
+                "event_id,bookmaker_key,market_key,selection_key",
+                return_rows=False,
+            )
+            counts["bulk_odds_chunks"] += 1
 
     return counts
 
@@ -497,12 +554,13 @@ def process_event_odds_payload(
             return_rows=False,
         )
     if odds_rows:
-        db.upsert(
-            "odds_current",
-            unique_rows(odds_rows, ("event_id", "bookmaker_key", "market_key", "selection_key")),
-            "event_id,bookmaker_key,market_key,selection_key",
-            return_rows=False,
-        )
+        for chunk in chunked(unique_rows(odds_rows, ("event_id", "bookmaker_key", "market_key", "selection_key")), 500):
+            db.upsert(
+                "odds_current",
+                chunk,
+                "event_id,bookmaker_key,market_key,selection_key",
+                return_rows=False,
+            )
 
 
 def supported_event_market(market_key: str | None) -> bool:
@@ -521,8 +579,106 @@ def is_spread_market(market_key: str) -> bool:
     return market_key in {"spreads", "alternate_spreads"} or market_key.startswith("alternate_spreads_")
 
 
-def chunked(items: list[str], size: int) -> list[list[str]]:
+def chunked(items: list[Any], size: int) -> list[list[Any]]:
     return [items[index : index + size] for index in range(0, len(items), size)]
+
+
+def limit_sync_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    max_events = sync_max_events()
+    if not max_events or len(events) <= max_events:
+        return events
+    return sorted(events, key=lambda event: event.get("commence_time") or "")[:max_events]
+
+
+def load_team_aliases_for_sport(db: SupabaseRestClient, sport_key: str) -> dict[str, dict[str, Any]]:
+    aliases = db.select(
+        "team_source_aliases",
+        {
+            "select": "team_id,raw_name",
+            "source": "eq.odds_api",
+            "sport_key": f"eq.{sport_key}",
+            "limit": "1000",
+        },
+    )
+    if not aliases:
+        return {}
+
+    team_ids = sorted({alias["team_id"] for alias in aliases if alias.get("team_id")})
+    teams = {}
+    for team_id_chunk in chunked(team_ids, 120):
+        for team in db.select("teams", {"select": "*", "id": f"in.({','.join(team_id_chunk)})"}):
+            teams[team["id"]] = team
+
+    result = {}
+    for alias in aliases:
+        team = teams.get(alias.get("team_id"))
+        if team:
+            result[alias["raw_name"]] = team
+    return result
+
+
+def bulk_upsert_api_events(
+    db: SupabaseRestClient,
+    sport_key: str,
+    source_events: list[dict[str, Any]],
+    now: str,
+    team_by_raw: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    rows = []
+    for source_event in source_events:
+        external_id = source_event.get("id")
+        home_raw = source_event.get("home_team")
+        away_raw = source_event.get("away_team")
+        commence_time = source_event.get("commence_time")
+        if not external_id or not home_raw or not away_raw or not commence_time:
+            continue
+        home_team = team_by_raw.get(home_raw)
+        away_team = team_by_raw.get(away_raw)
+        rows.append(
+            {
+                "source": "odds_api",
+                "external_event_id": external_id,
+                "sport_key": sport_key,
+                "home_team_id": home_team.get("id") if home_team else None,
+                "away_team_id": away_team.get("id") if away_team else None,
+                "home_team_raw": home_raw,
+                "away_team_raw": away_raw,
+                "commence_time": commence_time,
+                "status": "upcoming",
+                "raw_payload": compact_event_payload(source_event),
+                "last_odds_sync_at": now,
+                "updated_at": now,
+            }
+        )
+
+    if not rows:
+        return {}
+
+    for row_chunk in chunked(rows, 100):
+        db.upsert("events", row_chunk, "source,external_event_id", return_rows=False)
+
+    external_ids = sorted({row["external_event_id"] for row in rows})
+    return select_api_events_by_external_ids(db, external_ids)
+
+
+def select_api_events_by_external_ids(db: SupabaseRestClient, external_ids: list[str]) -> dict[str, dict[str, Any]]:
+    events_by_external_id = {}
+    for external_id_chunk in chunked(external_ids, 120):
+        for event in db.select(
+            "events",
+            {
+                "select": "id,external_event_id,home_team_raw,away_team_raw,home_team_id,away_team_id,commence_time,status",
+                "source": "eq.odds_api",
+                "external_event_id": f"in.({','.join(external_id_chunk)})",
+                "limit": str(max(120, len(external_id_chunk))),
+            },
+        ):
+            events_by_external_id[event["external_event_id"]] = event
+    return events_by_external_id
+
+
+def compact_event_payload(source_event: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in source_event.items() if key != "bookmakers"}
 
 
 def upsert_api_event(
@@ -554,7 +710,7 @@ def upsert_api_event(
                 "away_team_raw": away_raw,
                 "commence_time": source_event["commence_time"],
                 "status": "upcoming",
-                "raw_payload": source_event,
+                "raw_payload": compact_event_payload(source_event),
                 "last_odds_sync_at": now,
                 "updated_at": now,
             },
@@ -603,6 +759,7 @@ def mark_stale_syncs(db: SupabaseRestClient) -> None:
                 "finished_at": datetime.now(timezone.utc).isoformat(),
             },
             {"id": f"eq.{row['id']}"},
+            return_rows=False,
         )
 
 
@@ -831,6 +988,7 @@ def log_admin_action(
                 "target_id": target_id,
                 "metadata": metadata or {},
             },
+            return_rows=False,
         )
     except Exception:
         return

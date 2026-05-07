@@ -26,10 +26,11 @@ const state = {
   stake: 100,
   activeTab: 'events',
   scrollLocks: new Set(),
+  lockedScrollY: 0,
 };
 
 const labels = { home_win: 'П1', draw: 'X', away_win: 'П2', home_or_draw: '1X', home_or_away: '12', draw_or_away: 'X2' };
-const statusLabels = { pending: 'ожидает', won: 'выиграла', lost: 'проиграла', refund: 'возврат', cancelled: 'отменена' };
+const statusLabels = { pending: 'ожидает', won: 'выигрыш', lost: 'проигрыш', refund: 'возврат', cancelled: 'отменена' };
 const eventStatusLabels = { upcoming: 'ожидает', finished: 'завершён', cancelled: 'отменён' };
 const clientStatusLabels = { new: 'новый', active: 'активный', vip: 'VIP', test: 'тестовый', restricted: 'ограничен', suspended: 'приостановлен' };
 const sportTypeLabels = { soccer: 'Футбол', hockey: 'Хоккей', esports: 'Киберспорт' };
@@ -114,6 +115,14 @@ function closeNotice() {
 }
 
 function lockBodyScroll(reason) {
+  if (!state.scrollLocks.size) {
+    state.lockedScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${state.lockedScrollY}px`;
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+    document.body.style.width = '100%';
+  }
   state.scrollLocks.add(reason);
   document.body.classList.add('no-scroll');
 }
@@ -122,6 +131,12 @@ function unlockBodyScroll(reason) {
   state.scrollLocks.delete(reason);
   if (!state.scrollLocks.size) {
     document.body.classList.remove('no-scroll');
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.left = '';
+    document.body.style.right = '';
+    document.body.style.width = '';
+    window.scrollTo(0, state.lockedScrollY || 0);
   }
 }
 
@@ -147,12 +162,12 @@ function showLoadingSuccess(title = 'Готово', text = '') {
   const confetti = document.createElement('div');
   confetti.className = 'loading-confetti';
   const colors = ['#2f80ed', '#16a36a', '#f3b51f', '#9cc8ff'];
-  for (let index = 0; index < 30; index += 1) {
+  for (let index = 0; index < 44; index += 1) {
     const piece = document.createElement('span');
-    piece.style.setProperty('--x', `${Math.round((Math.random() * 220) - 110)}px`);
-    piece.style.setProperty('--y', `${Math.round(70 + (Math.random() * 90))}px`);
+    piece.style.setProperty('--x', `${Math.round((Math.random() * 260) - 130)}px`);
+    piece.style.setProperty('--y', `${Math.round(110 + (Math.random() * 120))}px`);
     piece.style.setProperty('--r', `${Math.round((Math.random() * 360) - 180)}deg`);
-    piece.style.setProperty('--delay', `${Math.random() * 260}ms`);
+    piece.style.setProperty('--delay', `${Math.random() * 520}ms`);
     piece.style.setProperty('--confetti-color', colors[index % colors.length]);
     confetti.appendChild(piece);
   }
@@ -281,7 +296,11 @@ async function apiFetch(path, options = {}) {
     return data;
   } catch (error) {
     if (error.name === 'AbortError') {
-      throw new Error('Запрос выполнялся слишком долго. Проверьте последние sync runs и попробуйте ещё раз.');
+      const timeoutError = new Error('Запрос выполнялся слишком долго. Проверьте последние sync runs и попробуйте ещё раз.');
+      timeoutError.timeout = true;
+      timeoutError.path = path;
+      timeoutError.timeoutMs = timeoutMs;
+      throw timeoutError;
     }
     throw error;
   } finally {
@@ -781,7 +800,7 @@ async function submitBet() {
     clearTicket();
     await loadBets();
     showLoadingSuccess('Ставка принята');
-    await delay(1850);
+    await delay(2800);
   } finally {
     hideLoading();
   }
@@ -1094,6 +1113,9 @@ async function syncOdds(singleSportKey = '') {
           status: error.status || null,
           data: error.data || null,
           responseText: error.responseText || null,
+          timeout: Boolean(error.timeout),
+          timeoutMs: error.timeoutMs || null,
+          path: error.path || '/api/admin/sync-odds',
           started_at: startedAt,
           finished_at: new Date().toISOString(),
         };
@@ -1136,7 +1158,6 @@ async function collectAdminDebugState() {
 async function refreshUsage() {
   const result = await apiFetch('/api/admin/refresh-odds-usage', { method: 'POST', body: JSON.stringify({}) });
   renderApiUsage(result.usage);
-  status(`Odds API credits: ${result.usage.quota_remaining ?? 'нет данных'}`);
 }
 
 async function loadUsers() {
@@ -1399,9 +1420,27 @@ async function loadAliases() {
 }
 
 function renderAliases() {
+  renderManualAliasForm(state.aliases);
   renderUnknownAliases(state.aliases.unknown_teams || []);
   renderSportAliases(state.aliases.sports || []);
   renderTeamAliases(state.aliases.teams || []);
+}
+
+function renderManualAliasForm(data) {
+  const sportSelect = document.querySelector('#manual-alias-sport');
+  const teamSelect = document.querySelector('#manual-alias-team');
+  if (!sportSelect || !teamSelect) return;
+
+  const sports = data?.sports || [];
+  const teams = (data?.teams || []).map((row) => row.team).filter(Boolean);
+  sportSelect.innerHTML = sports.map((sport) => `
+    <option value="${escapeAttr(sport.sport_key)}">${escapeHtml(sport.title_ru || sport.title_en || sport.sport_key)}</option>
+  `).join('');
+  teamSelect.innerHTML = `<option value="">Создать новую команду</option>${teams.map((team) => `
+    <option value="${escapeAttr(team.id)}">${escapeHtml(team.name_ru || team.name_en)} · ${escapeHtml(sportTypeLabels[team.sport_type] || team.sport_type || 'спорт')}</option>
+  `).join('')}`;
+  const button = document.querySelector('#create-manual-alias');
+  if (button) button.onclick = () => createManualAlias().catch((error) => notify(error.message, 'error'));
 }
 
 function renderUnknownAliases(unknown) {
@@ -1441,7 +1480,7 @@ function renderSportAliases(sports) {
         <input data-sport-title="${sport.sport_key}" value="${escapeAttr(sport.title_ru || '')}" placeholder="Название на русском">
         <input data-sport-logo="${sport.sport_key}" value="${escapeAttr(sport.logo_url || '')}" placeholder="Logo URL турнира">
         <button class="primary" data-save-sport="${sport.sport_key}">Сохранить</button>
-        ${sport.source === 'manual' ? `<button class="back-button danger-button" data-delete-sport="${escapeAttr(sport.sport_key)}" type="button">Удалить соревнование</button>` : ''}
+        ${(sport.source === 'manual' || sport.sport_key?.startsWith('manual_')) ? `<button class="back-button danger-button" data-delete-sport="${escapeAttr(sport.sport_key)}" type="button">Удалить соревнование</button>` : ''}
       </div>
     </article>
   `).join('') : '<p class="muted">Турниры появятся после sync.</p>';
@@ -1495,6 +1534,39 @@ async function createAlias(index) {
   status('Алиас создан');
   await loadAliases();
   await loadEvents();
+}
+
+async function createManualAlias() {
+  const sportKey = document.querySelector('#manual-alias-sport').value;
+  const rawName = document.querySelector('#manual-alias-raw').value.trim();
+  if (!sportKey || !rawName) {
+    notify('Выберите турнир и укажите название из API', 'error');
+    return;
+  }
+  showLoading('Алиас', 'Сохраняю алиас команды...');
+  try {
+    await apiFetch('/api/admin/team-aliases', {
+      method: 'POST',
+      body: JSON.stringify({
+        raw_name: rawName,
+        sport_key: sportKey,
+        team_id: document.querySelector('#manual-alias-team').value,
+        sport_type: document.querySelector('#manual-alias-sport-type').value,
+        name_ru: document.querySelector('#manual-alias-name').value,
+        short_name_ru: document.querySelector('#manual-alias-short').value,
+        logo_url: document.querySelector('#manual-alias-logo').value,
+      }),
+    });
+    document.querySelector('#manual-alias-raw').value = '';
+    document.querySelector('#manual-alias-name').value = '';
+    document.querySelector('#manual-alias-short').value = '';
+    document.querySelector('#manual-alias-logo').value = '';
+    notify('Алиас создан', 'success');
+    await loadAliases();
+    await loadEvents();
+  } finally {
+    hideLoading();
+  }
 }
 
 async function saveSport(sportKey) {

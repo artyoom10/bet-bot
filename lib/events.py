@@ -146,14 +146,7 @@ def get_sports_for_app(db: SupabaseRestClient) -> list[dict[str, Any]]:
         },
     )
     counts = {}
-    event_ids = [event["id"] for event in events if event.get("id")]
-    events_with_odds = set()
-    if event_ids:
-        odds_rows = db.select("odds_current", {"select": "event_id", "event_id": f"in.({','.join(event_ids)})", "limit": "1000"})
-        events_with_odds = {row["event_id"] for row in odds_rows}
     for event in events:
-        if event.get("id") not in events_with_odds:
-            continue
         counts[event["sport_key"]] = counts.get(event["sport_key"], 0) + 1
 
     return [

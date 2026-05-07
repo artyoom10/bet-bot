@@ -236,7 +236,7 @@ def selection_result_status(selection: dict[str, Any], winner: str, home_score: 
     market_key = selection.get("market_key") or "h2h"
     selection_key = selection["selection_key"]
 
-    if market_key == "h2h":
+    if market_key in {"h2h", "h2h_3_way"}:
         return "won" if selection_key == winner else "lost"
 
     if market_key == "double_chance":
@@ -247,7 +247,7 @@ def selection_result_status(selection: dict[str, Any], winner: str, home_score: 
         }
         return "won" if winner in wins.get(selection_key, set()) else "lost"
 
-    if market_key == "totals":
+    if is_total_market_key(market_key):
         line = selection_line(selection_key)
         if line is None:
             return "refund"
@@ -259,7 +259,7 @@ def selection_result_status(selection: dict[str, Any], winner: str, home_score: 
         if selection_key.startswith("total_under"):
             return "won" if total < line else "lost"
 
-    if market_key == "spreads":
+    if is_spread_market_key(market_key):
         line = selection_line(selection_key)
         if line is None:
             return "refund"
@@ -274,6 +274,14 @@ def selection_result_status(selection: dict[str, Any], winner: str, home_score: 
         return "won" if score > 0 else "lost"
 
     return "refund"
+
+
+def is_total_market_key(market_key: str) -> bool:
+    return market_key == "totals" or market_key.startswith("alternate_totals")
+
+
+def is_spread_market_key(market_key: str) -> bool:
+    return market_key == "spreads" or market_key.startswith("alternate_spreads")
 
 
 def selection_line(selection_key: str) -> float | None:

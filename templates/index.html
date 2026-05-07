@@ -182,7 +182,9 @@
       </section>
 
       <section class="admin-page" id="admin-page-sync">
-        <button class="back-button" data-admin-back>Назад</button>
+        <button class="plain-icon-button admin-page-back" data-admin-back type="button" aria-label="Назад">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
         <div class="admin-actions">
           <button class="primary" id="sync-odds">Обновить матчи и коэффициенты</button>
         </div>
@@ -205,7 +207,9 @@
       </section>
 
       <section class="admin-page" id="admin-page-api-usage">
-        <button class="back-button" data-admin-back>Назад</button>
+        <button class="plain-icon-button admin-page-back" data-admin-back type="button" aria-label="Назад">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
         <div class="admin-actions">
           <button class="primary" id="refresh-usage">Обновить статистику Odds API</button>
         </div>
@@ -216,7 +220,9 @@
       </section>
 
       <section class="admin-page" id="admin-page-all-events">
-        <button class="back-button" data-admin-back>Назад</button>
+        <button class="plain-icon-button admin-page-back" data-admin-back type="button" aria-label="Назад">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
         <div class="admin-actions">
           <button class="primary" id="reload-admin-events" type="button">Обновить список событий</button>
         </div>
@@ -224,7 +230,9 @@
       </section>
 
       <section class="admin-page" id="admin-page-users">
-        <button class="back-button" data-admin-back>Назад</button>
+        <button class="plain-icon-button admin-page-back" data-admin-back type="button" aria-label="Назад">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
         <div class="admin-actions">
           <button class="primary" id="open-create-user">Добавить пользователя</button>
         </div>
@@ -232,7 +240,9 @@
       </section>
 
       <section class="admin-page" id="admin-page-all-bets">
-        <button class="back-button" data-admin-back>Назад</button>
+        <button class="plain-icon-button admin-page-back" data-admin-back type="button" aria-label="Назад">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
         <div class="admin-actions">
           <label class="inline-control">Сортировка
             <select id="admin-bets-sort">
@@ -249,10 +259,29 @@
       </section>
 
       <section class="admin-page" id="admin-page-aliases">
-        <button class="back-button" data-admin-back>Назад</button>
+        <button class="plain-icon-button admin-page-back" data-admin-back type="button" aria-label="Назад">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
         <div class="admin-actions">
           <button class="primary" id="reload-aliases">Обновить алиасы</button>
         </div>
+        <article class="panel">
+          <h2>Создать алиас вручную</h2>
+          <div class="form-grid" id="manual-alias-form">
+            <select id="manual-alias-sport"></select>
+            <select id="manual-alias-team"></select>
+            <select id="manual-alias-sport-type">
+              <option value="soccer">Футбол</option>
+              <option value="hockey">Хоккей</option>
+              <option value="esports">Киберспорт</option>
+            </select>
+            <input id="manual-alias-raw" placeholder="Название из API, например Arsenal">
+            <input id="manual-alias-name" placeholder="Название на русском">
+            <input id="manual-alias-short" placeholder="Короткое название">
+            <input id="manual-alias-logo" placeholder="Logo URL команды">
+            <button class="primary" id="create-manual-alias" type="button">Создать алиас</button>
+          </div>
+        </article>
         <article class="panel">
           <h2>Пустые команды</h2>
           <div class="stack" id="unknown-aliases"></div>
@@ -268,7 +297,9 @@
       </section>
 
       <section class="admin-page" id="admin-page-results">
-        <button class="back-button" data-admin-back>Назад</button>
+        <button class="plain-icon-button admin-page-back" data-admin-back type="button" aria-label="Назад">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
         <div class="admin-actions">
           <button class="primary" id="sync-results">Обновить результаты и рассчитать ставки</button>
         </div>
@@ -297,7 +328,9 @@
       </section>
 
       <section class="admin-page" id="admin-page-constructor">
-        <button class="back-button" data-admin-back>Назад</button>
+        <button class="plain-icon-button admin-page-back" data-admin-back type="button" aria-label="Назад">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
         <article class="panel">
           <h2>Конструктор событий</h2>
           <form class="wizard-form" id="manual-event-form">

@@ -35,7 +35,7 @@
 - `lib/events.py`: выдача линии для Mini App, форматирование команд, markets и outcomes.
 - `lib/bets.py`: валидация купона, создание single/express ставок, история ставок, ручной admin settlement и удаление ставки.
 - `lib/odds_api.py`: HTTP calls к The Odds API; для хоккея регионы берутся из `ODDS_API_HOCKEY_REGIONS`, для остальных видов спорта из `ODDS_API_REGIONS`.
-- `lib/odds_sync.py`: sync sports/events/odds, detailed event markets, sync_runs debug; нормализует базовые и detailed markets в русские названия исходов; fast sync пишет odds bulk upsert и не пишет snapshots.
+- `lib/odds_sync.py`: sync sports/events/odds, detailed event markets, sync_runs debug; нормализует базовые и detailed markets в русские названия исходов; fast sync пишет odds bulk upsert, не пишет snapshots, ограничивает ближайшие события через `ODDS_SYNC_MAX_EVENTS` и логирует в `admin_logs` компактный summary.
 - `lib/settlement.py`: sync scores, ручной результат, `result_note` для ОТ/буллитов, расчёт pending ставок.
 - `static/app.js`: весь frontend state, Telegram Mini App UI, админка, купон, история.
 
@@ -46,7 +46,7 @@
 3. Backend валидирует initData. Если user уже есть в Supabase, профиль обновляется; если user неизвестен и не входит в `ADMIN_TELEGRAM_IDS`, `/api/me` возвращает `access_denied`.
 4. `/api/sports` и `/api/events` читают upcoming events и odds из Supabase.
 5. Админ запускает `/api/admin/sync-odds`; frontend может делать один общий sync или отдельные запросы по турнирам (`sport_keys: ["soccer_epl"]`, `["icehockey_nhl"]` и т.д.).
-6. Backend получает events/odds из The Odds API и пишет `events`, `bookmakers`, `odds_current`, `sync_runs`; odds/bookmakers пишутся bulk upsert с minimal response. Fast sync не пишет `odds_snapshots`.
+6. Backend получает events/odds из The Odds API и пишет `events`, `bookmakers`, `odds_current`, `sync_runs`; odds/bookmakers пишутся bulk upsert с minimal response. Fast sync не пишет `odds_snapshots` и по умолчанию берёт ближайшие 40 событий турнира.
 7. Пользователь выбирает исходы; frontend отправляет `/api/bets` с amount и selections.
 8. `lib/bets.py` валидирует odds, списывает demo-баланс, создаёт `bets`, `bet_selections`, `wallet_transactions`.
 9. Админ запускает scores/manual settlement; `lib/settlement.py` обновляет events, bet selections, bets и wallet. Для хоккея ручной расчёт может сохранить `result_note=ot|so`.
@@ -63,6 +63,8 @@
 - The Odds API расходует credits; `/scores` с `daysFrom` дороже.
 - Detailed markets по событию могут расходовать дополнительные credits.
 - Fast sync ограничивает список обрабатываемых букмекеров через `ODDS_SYNC_BOOKMAKER_KEYS`; значение `all` обрабатывает всех букмекеров, но повышает риск timeout.
+- `ODDS_API_MARKETS` задаёт базовые markets для общего sync; по умолчанию это `h2h,spreads,totals`.
+- `ODDS_SYNC_MAX_EVENTS` ограничивает число ближайших событий на один sync турнира; значение `0` отключает лимит, но повышает риск timeout.
 - Базовый sync запрашивает `h2h,spreads,totals`; дополнительные рынки по событию подтягиваются отдельной кнопкой “Получить рынок”.
 - Поддерживаемые базовые турниры сейчас: `soccer_epl`, `soccer_russia_premier_league`, `soccer_spain_la_liga`, `soccer_uefa_champs_league`, `icehockey_nhl`.
 
@@ -76,4 +78,5 @@
 - Settlement защищён проверкой pending status, но при параллельных запусках остаётся риск гонок.
 - The Odds API может не вернуть odds/scores по конкретной лиге, региону или рынку.
 - NHL чувствителен к `regions`; для него используется отдельная переменная `ODDS_API_HOCKEY_REGIONS=us,eu`.
+- `active=true` в `/sports` The Odds API означает доступность спорта/лиги для запросов; `has_outrights=false` означает отсутствие futures/outrights рынков, а не запрет обычных event odds.
 - TODO: добавить server-side pagination для больших списков событий, ставок и пользователей.

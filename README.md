@@ -15,7 +15,9 @@ SUPABASE_SERVICE_ROLE_KEY=
 ODDS_API_KEY=
 ODDS_API_REGIONS=eu
 ODDS_API_HOCKEY_REGIONS=us,eu
+ODDS_API_MARKETS=h2h,spreads,totals
 ODDS_SYNC_BOOKMAKER_KEYS=pinnacle,onexbet,marathonbet
+ODDS_SYNC_MAX_EVENTS=40
 ADMIN_TELEGRAM_IDS=
 DEBUG_ADMIN=0
 ```
@@ -23,7 +25,9 @@ DEBUG_ADMIN=0
 `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, and `ODDS_API_KEY` are backend-only secrets.
 `ODDS_API_REGIONS` can be expanded, for example `eu,uk`, if a league has events but no odds in the current region.
 `ODDS_API_HOCKEY_REGIONS` is optional and defaults to `us,eu`; NHL odds are often available in `us`, so hockey sync uses this value instead of the football region list.
+`ODDS_API_MARKETS` controls base sync markets. Keep it small for Vercel; use the admin “Получить рынок” action for detailed event markets.
 `ODDS_SYNC_BOOKMAKER_KEYS` limits how many bookmakers are processed during normal sync. Use `all` only if your Vercel function timeout and Supabase quota can handle the larger write volume.
+`ODDS_SYNC_MAX_EVENTS` caps how many nearest events one tournament sync writes. Set `0` only if your Vercel timeout can handle full long schedules.
 
 ## Supabase setup
 

@@ -12,7 +12,12 @@ from lib.users import first
 
 
 def get_aliases_dashboard(db: SupabaseRestClient) -> dict[str, Any]:
-    sports = db.select("sports", {"select": "*", "order": "sport_key.asc"})
+    sports = [
+        sport
+        for sport in db.select("sports", {"select": "*", "order": "sport_key.asc"})
+        if sport.get("is_enabled")
+        or (sport.get("source") != "manual" and not str(sport.get("sport_key") or "").startswith("manual_"))
+    ]
     teams = db.select("teams", {"select": "*", "order": "name_en.asc", "limit": "300"})
     aliases = db.select("team_source_aliases", {"select": "*", "order": "raw_name.asc", "limit": "1000"})
     events = db.select(

@@ -758,7 +758,7 @@ def admin_events_payload(db) -> list[dict[str, Any]]:
 
 
 def manual_events_payload(db) -> dict[str, Any]:
-    sports = db.select("sports", {"select": "*", "order": "title_ru.asc", "limit": "200"})
+    sports = db.select("sports", {"select": "*", "is_enabled": "eq.true", "order": "title_ru.asc", "limit": "200"})
     teams = db.select("teams", {"select": "*", "is_active": "eq.true", "order": "name_ru.asc", "limit": "500"})
     events = db.select(
         "events",
@@ -956,7 +956,8 @@ def delete_manual_sport(db, admin_user: dict[str, Any], sport_key: str) -> dict[
     sport = first(db.select("sports", {"select": "*", "sport_key": f"eq.{sport_key}", "limit": "1"}))
     if not sport:
         raise AppError("manual_sport_not_found", "Ручное соревнование не найдено", 404)
-    if sport.get("source") != "manual" and not str(sport_key).startswith("manual_"):
+    is_manual_sport = sport.get("source") == "manual" or str(sport_key).startswith("manual_")
+    if not is_manual_sport:
         raise AppError("manual_sport_not_found", "Удалять можно только созданные вручную соревнования", 400)
 
     events = db.select("events", {"select": "id", "sport_key": f"eq.{sport_key}", "source": "eq.manual", "limit": "500"})
@@ -969,6 +970,7 @@ def delete_manual_sport(db, admin_user: dict[str, Any], sport_key: str) -> dict[
             summary["events_cancelled"] += 1
         summary["bets_settled"] += int(result.get("bets_settled") or 0)
 
+    db.delete("team_source_aliases", {"sport_key": f"eq.{sport_key}"})
     remaining = db.select("events", {"select": "id", "sport_key": f"eq.{sport_key}", "limit": "1"})
     if remaining:
         disabled = first(
@@ -976,6 +978,7 @@ def delete_manual_sport(db, admin_user: dict[str, Any], sport_key: str) -> dict[
                 "sports",
                 {"is_enabled": False, "updated_at": datetime.now(timezone.utc).isoformat()},
                 {"sport_key": f"eq.{sport_key}"},
+                return_rows=False,
             )
         )
         return {"deleted": False, "disabled": True, "sport": disabled or sport, **summary}
