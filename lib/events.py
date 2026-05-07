@@ -97,7 +97,7 @@ def get_events_for_app(db: SupabaseRestClient, sport_key: str | None = None) -> 
     formatted = []
     for event in events:
         event_rows = [row for row in odds_by_event.get(event["id"], []) if not is_lay_market(row["market_key"])]
-        event_odds = choose_market_odds(event_rows, "h2h") or choose_bookmaker_odds(event_rows)
+        event_odds = choose_primary_event_odds(event_rows, event["sport_key"])
         if not event_odds:
             continue
 
@@ -237,6 +237,20 @@ def choose_bookmaker_odds(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     preferred = [row for row in rows if row["bookmaker_key"] == "pinnacle"]
     selected_key = "pinnacle" if preferred else rows[0]["bookmaker_key"]
     return [row for row in rows if row["bookmaker_key"] == selected_key]
+
+
+def choose_primary_event_odds(rows: list[dict[str, Any]], sport_key: str) -> list[dict[str, Any]]:
+    primary_markets = ["h2h", "h2h_3_way"]
+    if sport_key.startswith("soccer_"):
+        primary_markets.extend(["double_chance", "spreads", "totals"])
+    else:
+        primary_markets.extend(["spreads", "totals"])
+
+    for market_key in primary_markets:
+        market_rows = choose_market_odds(rows, market_key)
+        if market_rows:
+            return market_rows
+    return choose_bookmaker_odds(rows)
 
 
 def choose_market_odds(rows: list[dict[str, Any]], market_key: str) -> list[dict[str, Any]]:

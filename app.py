@@ -970,7 +970,7 @@ def delete_event_in_manual_sport(db, admin_user: dict[str, Any], event: dict[str
     linked = db.select("bet_selections", {"select": "id", "event_id": f"eq.{event_id}", "limit": "1"})
     if linked:
         now = datetime.now(timezone.utc).isoformat()
-        cancelled = first(
+        event = first(
             db.update(
                 "events",
                 {
@@ -990,7 +990,15 @@ def delete_event_in_manual_sport(db, admin_user: dict[str, Any], event: dict[str
             return_rows=False,
         )
         settled = settle_pending_bets(db, [event_id])
-        return {"deleted": False, "cancelled": True, "event": cancelled or event, "bets_settled": settled}
+        db.update("bet_selections", {"event_id": None}, {"event_id": f"eq.{event_id}"}, return_rows=False)
+        db.delete("odds_current", {"event_id": f"eq.{event_id}"})
+        deleted = db.delete("events", {"id": f"eq.{event_id}"})
+        return {
+            "deleted": True,
+            "cancelled": True,
+            "event": first(deleted) or event,
+            "bets_settled": settled,
+        }
 
     db.delete("odds_current", {"event_id": f"eq.{event_id}"})
     deleted = db.delete("events", {"id": f"eq.{event_id}"})

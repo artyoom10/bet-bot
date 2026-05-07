@@ -27,6 +27,7 @@ DEBUG_ADMIN=0
 `ODDS_API_HOCKEY_REGIONS` is optional and defaults to `us,eu`; NHL odds are often available in `us`, so hockey sync uses this value instead of the football region list.
 `ODDS_API_MARKETS` controls base sync markets. Keep it small for Vercel; use the admin “Получить рынок” action for detailed event markets.
 `ODDS_SYNC_BOOKMAKER_KEYS` limits how many bookmakers are processed during normal sync. Use `all` only if your Vercel function timeout and Supabase quota can handle the larger write volume.
+If selected bookmakers do not return `h2h`/`h2h_3_way` for an event, sync adds up to two fallback bookmakers with a regular match outcome.
 `ODDS_SYNC_MAX_EVENTS` caps how many nearest events one tournament sync writes. Set `0` only if your Vercel timeout can handle full long schedules.
 
 ## Supabase setup
@@ -41,9 +42,10 @@ For an existing database, also run:
 ```sql
 -- supabase/migrations/20260428_results_and_express.sql
 -- supabase/migrations/20260507_sport_logos_and_result_note.sql
+-- supabase/migrations/20260507_cascade_delete_and_sport_logos.sql
 ```
 
-This adds result fields, payout fields, express settlement status, team/tournament logo support, hockey result notes, and `settlement_runs`.
+This adds result fields, payout fields, express settlement status, team/tournament logo support, hockey result notes, cascade/delete-safe foreign keys, and `settlement_runs`.
 
 ## Admin endpoints
 

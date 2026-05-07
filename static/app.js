@@ -168,7 +168,7 @@ function showLoadingSuccess(title = 'Готово', text = '') {
     piece.style.setProperty('--x', `${Math.round((Math.random() * 320) - 160)}px`);
     piece.style.setProperty('--y', `${Math.round(150 + (Math.random() * 170))}px`);
     piece.style.setProperty('--r', `${Math.round((Math.random() * 360) - 180)}deg`);
-    piece.style.setProperty('--delay', `${Math.random() * 760}ms`);
+    piece.style.setProperty('--delay', `${Math.random() * 420}ms`);
     piece.style.setProperty('--confetti-color', colors[index % colors.length]);
     confetti.appendChild(piece);
   }
@@ -520,7 +520,7 @@ function renderEvent(event) {
         ${teamLine(event.home_team)}
         ${teamLine(event.away_team)}
       </div>
-      <div class="market-row">
+      <div class="market-row ${event.odds.outcomes.length === 2 ? 'two' : ''}">
         ${event.odds.outcomes.map((outcome) => {
           const active = state.selections.some((item) => item.event.id === event.id && item.outcome.selection_key === outcome.selection_key);
           return `
@@ -822,7 +822,7 @@ async function submitBet() {
     clearTicket();
     await loadBets();
     showLoadingSuccess('Ставка принята');
-    await delay(3800);
+    await delay(4400);
   } finally {
     hideLoading();
   }

@@ -65,10 +65,12 @@
 - The Odds API расходует credits; `/scores` с `daysFrom` дороже.
 - Detailed markets по событию могут расходовать дополнительные credits.
 - Fast sync ограничивает список обрабатываемых букмекеров через `ODDS_SYNC_BOOKMAKER_KEYS`; значение `all` обрабатывает всех букмекеров, но повышает риск timeout.
+- Если выбранные через `ODDS_SYNC_BOOKMAKER_KEYS` букмекеры по конкретному событию не дают `h2h/h2h_3_way`, sync добавляет до двух fallback-букмекеров с обычным исходом для этого события.
 - `ODDS_API_MARKETS` задаёт базовые markets для общего sync; по умолчанию это `h2h,spreads,totals`.
 - `ODDS_SYNC_MAX_EVENTS` ограничивает число ближайших событий на один sync турнира; значение `0` отключает лимит, но повышает риск timeout.
 - Базовый sync запрашивает `h2h,spreads,totals`; дополнительные рынки по событию подтягиваются отдельной кнопкой “Получить рынок”.
 - Поддерживаемые базовые турниры сейчас: `soccer_epl`, `soccer_russia_premier_league`, `soccer_spain_la_liga`, `soccer_uefa_champs_league`, `icehockey_nhl`.
+- Для существующей Supabase БД нужно применить `supabase/migrations/20260507_cascade_delete_and_sport_logos.sql`, иначе `sports.logo_url` может отсутствовать, а удаление соревнований может блокироваться FK `events.sport_key`.
 
 ## Известные слабые места
 
@@ -88,3 +90,4 @@
 
 - Удаление ручного соревнования выполняется только для `sports.source='manual'` или sport keys с префиксом `manual_`. Backend обрабатывает все события такого sport key: события без ставок удаляются, события со связанными ставками отменяются и рассчитываются как refund, после чего соревнование удаляется или скрывается через `is_enabled=false`, если физически удалить связанные события нельзя.
 - Удаление пользователя сначала пытается физически удалить строку `users` и связанные cascade-данные. Если Supabase/Postgres не разрешает delete из-за внешних ссылок, профиль переводится в tombstone `tg_id='deleted:*'`, блокируется и скрывается из админского списка; старый Telegram ID после этого не проходит клубный доступ.
+- Целевые FK-правила: `events.sport_key -> sports(sport_key) on delete cascade`, `odds_current/odds_snapshots.event_id -> events(id) on delete cascade`, `bet_selections.event_id -> events(id) on delete set null`, `bets.user_id/wallets.user_id/wallet_transactions.user_id -> users(id) on delete cascade`, admin/sync/settlement references to users use `on delete set null`.

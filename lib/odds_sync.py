@@ -69,10 +69,22 @@ def filter_bookmakers(bookmakers: list[dict[str, Any]]) -> tuple[list[dict[str, 
 
     selected = [bookmaker for bookmaker in bookmakers if bookmaker.get("key") in keys]
     if selected:
+        if not any(bookmaker_has_market(bookmaker, "h2h") or bookmaker_has_market(bookmaker, "h2h_3_way") for bookmaker in selected):
+            fallback_h2h = [
+                bookmaker
+                for bookmaker in bookmakers
+                if bookmaker.get("key") not in keys and (bookmaker_has_market(bookmaker, "h2h") or bookmaker_has_market(bookmaker, "h2h_3_way"))
+            ][:2]
+            if fallback_h2h:
+                return [*selected, *fallback_h2h], f"{','.join(keys)}+h2h_fallback"
         return selected, ",".join(keys)
 
     fallback_count = min(3, len(bookmakers))
     return bookmakers[:fallback_count], f"fallback_first_{fallback_count}"
+
+
+def bookmaker_has_market(bookmaker: dict[str, Any], market_key: str) -> bool:
+    return any(market.get("key") == market_key for market in bookmaker.get("markets", []))
 
 
 def unique_rows(rows: list[dict[str, Any]], key_fields: tuple[str, ...]) -> list[dict[str, Any]]:
