@@ -938,18 +938,55 @@ def delete_manual_event(db, admin_user: dict[str, Any], event_id: str) -> dict[s
                     "result_winner": "cancelled",
                     "settled_at": now,
                     "updated_at": now,
-                    "raw_payload": {**(existing.get("raw_payload") or {}), "deleted_by_admin_tg_id": admin_user.get("tg_id")},
+                    "raw_payload": deleted_event_payload(existing.get("raw_payload"), admin_user),
                 },
                 {"id": f"eq.{event_id}"},
             )
         )
-        db.update("bet_selections", {"result_status": "refund"}, {"event_id": f"eq.{event_id}", "result_status": "eq.pending"})
+        db.update(
+            "bet_selections",
+            {"result_status": "refund"},
+            {"event_id": f"eq.{event_id}", "result_status": "eq.pending"},
+            return_rows=False,
+        )
         settled = settle_pending_bets(db, [event_id])
         return {"deleted": False, "cancelled": True, "event": event, "bets_settled": settled}
 
     db.delete("odds_current", {"event_id": f"eq.{event_id}", "bookmaker_key": "eq.manual"})
     deleted = db.delete("events", {"id": f"eq.{event_id}", "source": "eq.manual"})
     return {"deleted": True, "event": first(deleted) or existing}
+
+
+def delete_event_in_manual_sport(db, admin_user: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+    event_id = event["id"]
+    linked = db.select("bet_selections", {"select": "id", "event_id": f"eq.{event_id}", "limit": "1"})
+    if linked:
+        now = datetime.now(timezone.utc).isoformat()
+        cancelled = first(
+            db.update(
+                "events",
+                {
+                    "status": "cancelled",
+                    "result_winner": "cancelled",
+                    "settled_at": now,
+                    "updated_at": now,
+                    "raw_payload": deleted_event_payload(event.get("raw_payload"), admin_user),
+                },
+                {"id": f"eq.{event_id}"},
+            )
+        )
+        db.update(
+            "bet_selections",
+            {"result_status": "refund"},
+            {"event_id": f"eq.{event_id}", "result_status": "eq.pending"},
+            return_rows=False,
+        )
+        settled = settle_pending_bets(db, [event_id])
+        return {"deleted": False, "cancelled": True, "event": cancelled or event, "bets_settled": settled}
+
+    db.delete("odds_current", {"event_id": f"eq.{event_id}"})
+    deleted = db.delete("events", {"id": f"eq.{event_id}"})
+    return {"deleted": True, "event": first(deleted) or event}
 
 
 def delete_manual_sport(db, admin_user: dict[str, Any], sport_key: str) -> dict[str, Any]:
@@ -960,10 +997,10 @@ def delete_manual_sport(db, admin_user: dict[str, Any], sport_key: str) -> dict[
     if not is_manual_sport:
         raise AppError("manual_sport_not_found", "Удалять можно только созданные вручную соревнования", 400)
 
-    events = db.select("events", {"select": "id", "sport_key": f"eq.{sport_key}", "source": "eq.manual", "limit": "500"})
-    summary = {"events_deleted": 0, "events_cancelled": 0, "bets_settled": 0}
+    events = db.select("events", {"select": "*", "sport_key": f"eq.{sport_key}", "limit": "1000"})
+    summary = {"events_scanned": len(events), "events_deleted": 0, "events_cancelled": 0, "bets_settled": 0}
     for event in events:
-        result = delete_manual_event(db, admin_user, event["id"])
+        result = delete_event_in_manual_sport(db, admin_user, event)
         if result.get("deleted"):
             summary["events_deleted"] += 1
         if result.get("cancelled"):
@@ -985,6 +1022,17 @@ def delete_manual_sport(db, admin_user: dict[str, Any], sport_key: str) -> dict[
 
     deleted = db.delete("sports", {"sport_key": f"eq.{sport_key}"})
     return {"deleted": True, "sport": first(deleted) or sport, **summary}
+
+
+def deleted_event_payload(raw_payload: Any, admin_user: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(raw_payload, dict):
+        payload = dict(raw_payload)
+    elif raw_payload is None:
+        payload = {}
+    else:
+        payload = {"previous_payload": raw_payload}
+    payload["deleted_by_admin_tg_id"] = admin_user.get("tg_id")
+    return payload
 
 
 def save_manual_odds(

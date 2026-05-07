@@ -24,6 +24,9 @@ def list_admin_users(db: SupabaseRestClient) -> list[dict[str, Any]]:
     )
     if not users:
         return []
+    users = [user for user in users if not is_deleted_user(user)]
+    if not users:
+        return []
 
     user_ids = [user["id"] for user in users]
     wallets = db.select(
@@ -169,13 +172,43 @@ def delete_admin_user(db: SupabaseRestClient, admin_user: dict[str, Any], user_i
     if admin_user.get("id") and user_id == admin_user.get("id"):
         raise AppError("delete_self_forbidden", "Нельзя удалить собственный админ-профиль", 400)
 
-    deleted = db.delete("users", {"id": f"eq.{user_id}"})
-    log_admin_action(db, admin_user, "delete_user", "user", user_id, {"tg_id": user.get("tg_id")})
-    return {"deleted": True, "user": first(deleted) or user}
+    try:
+        deleted = db.delete("users", {"id": f"eq.{user_id}"})
+        log_admin_action(db, admin_user, "delete_user", "user", user_id, {"tg_id": user.get("tg_id")})
+        return {"deleted": True, "user": first(deleted) or user}
+    except AppError as exc:
+        if exc.error != "supabase_error":
+            raise
+
+    tombstone = f"deleted:{uuid4().hex}"
+    patch = {
+        "tg_id": tombstone,
+        "username": None,
+        "first_name": "Удаленный",
+        "last_name": None,
+        "client_status": "suspended",
+        "is_blocked": True,
+        "block_reason": "deleted_by_admin",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    archived = first(db.update("users", patch, {"id": f"eq.{user_id}"})) or {**user, **patch}
+    log_admin_action(
+        db,
+        admin_user,
+        "archive_user_after_delete_failed",
+        "user",
+        user_id,
+        {"tg_id": user.get("tg_id"), "reason": "foreign_key_reference"},
+    )
+    return {"deleted": True, "archived": True, "user": archived}
 
 
 def clean_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def is_deleted_user(user: dict[str, Any]) -> bool:
+    return str(user.get("tg_id") or "").startswith("deleted:")
 
 
 def parse_balance(value: Any) -> float:

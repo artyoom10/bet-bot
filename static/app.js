@@ -162,12 +162,12 @@ function showLoadingSuccess(title = 'Готово', text = '') {
   const confetti = document.createElement('div');
   confetti.className = 'loading-confetti';
   const colors = ['#2f80ed', '#16a36a', '#f3b51f', '#9cc8ff'];
-  for (let index = 0; index < 44; index += 1) {
+  for (let index = 0; index < 64; index += 1) {
     const piece = document.createElement('span');
-    piece.style.setProperty('--x', `${Math.round((Math.random() * 260) - 130)}px`);
-    piece.style.setProperty('--y', `${Math.round(110 + (Math.random() * 120))}px`);
+    piece.style.setProperty('--x', `${Math.round((Math.random() * 320) - 160)}px`);
+    piece.style.setProperty('--y', `${Math.round(150 + (Math.random() * 170))}px`);
     piece.style.setProperty('--r', `${Math.round((Math.random() * 360) - 180)}deg`);
-    piece.style.setProperty('--delay', `${Math.random() * 520}ms`);
+    piece.style.setProperty('--delay', `${Math.random() * 760}ms`);
     piece.style.setProperty('--confetti-color', colors[index % colors.length]);
     confetti.appendChild(piece);
   }
@@ -800,7 +800,7 @@ async function submitBet() {
     clearTicket();
     await loadBets();
     showLoadingSuccess('Ставка принята');
-    await delay(2800);
+    await delay(3800);
   } finally {
     hideLoading();
   }
@@ -1296,6 +1296,7 @@ function renderAdminBets() {
   });
   root.querySelectorAll('[data-admin-settle-bet]').forEach((button) => button.addEventListener('click', () => settleAdminBet(button.dataset.adminSettleBet)));
   root.querySelectorAll('[data-admin-delete-bet]').forEach((button) => button.addEventListener('click', () => deleteAdminBet(button.dataset.adminDeleteBet)));
+  root.querySelectorAll('[data-admin-bet-status]').forEach((select) => select.addEventListener('change', () => updateAdminBetPayoutInput(select.dataset.adminBetStatus)));
 }
 
 function renderAdminBetCard({ bet, selections }) {
@@ -1317,14 +1318,18 @@ function renderAdminBetCard({ bet, selections }) {
         </span>
       `).join('')}</div>
       <div class="form-grid admin-bet-actions">
-        <select data-admin-bet-status="${bet.id}" ${bet.status === 'pending' ? '' : 'disabled'}>
-          <option value="won">Выигрыш</option>
-          <option value="lost">Проигрыш</option>
-          <option value="refund">Возврат</option>
-          <option value="cancelled">Отменить</option>
-        </select>
-        <input data-admin-bet-payout="${bet.id}" type="number" min="0" step="0.01" value="${Number(bet.possible_win || 0).toFixed(2)}" ${bet.status === 'pending' ? '' : 'disabled'}>
-        <button class="primary" data-admin-settle-bet="${bet.id}" type="button" ${bet.status === 'pending' ? '' : 'disabled'}>Рассчитать</button>
+        <label class="inline-control">Итог ставки
+          <select data-admin-bet-status="${bet.id}" ${bet.status === 'pending' ? '' : 'disabled'}>
+            <option value="won">Выигрыш</option>
+            <option value="lost">Проигрыш</option>
+            <option value="refund">Возврат</option>
+            <option value="cancelled">Отменить</option>
+          </select>
+        </label>
+        <label class="inline-control">Выплата
+          <input data-admin-bet-payout="${bet.id}" type="number" min="0" step="0.01" value="${Number(bet.possible_win || 0).toFixed(2)}" ${bet.status === 'pending' ? '' : 'disabled'}>
+        </label>
+        <button class="primary" data-admin-settle-bet="${bet.id}" type="button" ${bet.status === 'pending' ? '' : 'disabled'}>Применить итог</button>
         <button class="back-button danger-button" data-admin-delete-bet="${bet.id}" type="button">Удалить</button>
       </div>
     </article>
@@ -1333,6 +1338,17 @@ function renderAdminBetCard({ bet, selections }) {
 
 function adminUserName(user) {
   return user ? [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || user.tg_id : 'Пользователь не найден';
+}
+
+function updateAdminBetPayoutInput(betId) {
+  const row = state.adminBets.find((item) => item.bet.id === betId);
+  const statusValue = document.querySelector(`[data-admin-bet-status="${betId}"]`)?.value;
+  const payoutInput = document.querySelector(`[data-admin-bet-payout="${betId}"]`);
+  if (!row || !statusValue || !payoutInput) return;
+  let payout = 0;
+  if (statusValue === 'won') payout = Number(row.bet.possible_win || 0);
+  if (statusValue === 'refund') payout = Number(row.bet.amount || 0);
+  payoutInput.value = payout.toFixed(2);
 }
 
 async function settleAdminBet(betId) {

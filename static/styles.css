@@ -1005,9 +1005,9 @@ h3 { margin: 0; font-size: 15px; }
   position: absolute;
   inset: 0;
   pointer-events: none;
-  overflow: hidden;
+  overflow: visible;
 }
-.loading-card { position: relative; overflow: hidden; }
+.loading-card { position: relative; overflow: visible; }
 .loading-confetti span {
   position: absolute;
   left: 50%;
@@ -1018,7 +1018,7 @@ h3 { margin: 0; font-size: 15px; }
   background: var(--confetti-color);
   opacity: 0;
   transform: translate(-50%, 0) rotate(0);
-  animation: confettiBurst 1800ms cubic-bezier(.12, .76, .2, 1) var(--delay) both;
+  animation: confettiBurst 2600ms cubic-bezier(.12, .76, .2, 1) var(--delay) both;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes successPop {
