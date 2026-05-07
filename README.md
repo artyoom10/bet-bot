@@ -78,6 +78,19 @@ pip install -r requirements.txt
 flask --app app run --debug
 ```
 
+## Vercel deploy
+
+The production Vercel entrypoint is `api/index.py`, which imports the Flask app from root `app.py`.
+`vercel.json` must not use legacy `builds`; it uses `functions` plus a rewrite to `/api/index`.
+
+To force a fresh production deployment from this repository:
+
+```powershell
+npx vercel link
+npx vercel pull --yes --environment=production
+npx vercel deploy --prod --force
+```
+
 ## Telegram webhook
 
 ```powershell
