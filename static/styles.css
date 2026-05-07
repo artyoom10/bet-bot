@@ -515,16 +515,27 @@ h3 { margin: 0; font-size: 15px; }
   color: var(--text);
   background: #fff;
 }
+.slip-controls input#stake {
+  min-height: 58px;
+  border-radius: 18px;
+  padding: 10px 16px;
+  font-size: 28px;
+  font-weight: 950;
+  letter-spacing: 0;
+  text-align: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), 0 10px 22px rgba(15, 40, 75, .08);
+}
 .slip-controls input.invalid { border-color: rgba(217, 74, 74, .78); color: var(--danger); background: #fff7f7; }
 .field-error { color: var(--danger); font-size: 12px; font-weight: 700; }
-.stake-presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 8px; }
+.stake-presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(78px, 1fr)); gap: 8px; }
 .stake-presets button {
-  min-height: 44px;
+  min-height: 48px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 14px;
   color: var(--text);
-  background: var(--surface-2);
-  font-weight: 850;
+  background: linear-gradient(180deg, #fff 0%, var(--surface-2) 100%);
+  font-size: 15px;
+  font-weight: 900;
 }
 .stake-presets button.active { border-color: #101828; color: #fff; background: #101828; }
 
@@ -835,7 +846,7 @@ h3 { margin: 0; font-size: 15px; }
   backdrop-filter: blur(10px);
 }
 .loading-modal { z-index: 60; }
-.loading-modal.success { background: rgba(16, 85, 60, .34); }
+.loading-modal.success { background: rgba(16, 85, 60, .28); }
 .loading-modal.success .loading-card { animation: successPop 420ms cubic-bezier(.16, .95, .22, 1.08) both; }
 .welcome-screen {
   z-index: 30;
@@ -855,6 +866,16 @@ h3 { margin: 0; font-size: 15px; }
   padding: 18px;
   background: #fff;
   box-shadow: var(--shadow);
+}
+.loading-card {
+  max-width: 330px;
+  gap: 16px;
+  padding: 26px 22px;
+}
+.loading-card h2 {
+  margin-bottom: -4px;
+  font-size: 24px;
+  font-weight: 950;
 }
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .loading-card, .blocked-card, .club-denied-card, .welcome-card { justify-items: center; text-align: center; }
@@ -987,35 +1008,35 @@ h3 { margin: 0; font-size: 15px; }
 }
 .loading-modal.success .spinner {
   position: relative;
-  width: 76px;
-  height: 76px;
+  width: 86px;
+  height: 86px;
   border: 0;
   background:
     radial-gradient(circle at 50% 50%, #ffffff 0 44%, transparent 45%),
     linear-gradient(135deg, #78e0aa 0%, #13a66b 100%);
-  box-shadow: 0 18px 40px rgba(22, 163, 106, .32), inset 0 0 0 1px rgba(255, 255, 255, .7);
-  animation: successCheckPop 760ms cubic-bezier(.16, .95, .22, 1.08) both;
+  box-shadow: 0 20px 46px rgba(22, 163, 106, .28), inset 0 0 0 1px rgba(255, 255, 255, .7);
+  animation: successCheckPop 920ms cubic-bezier(.16, .95, .22, 1.08) both;
 }
 .loading-modal.success .spinner::before {
   content: "";
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 28px;
-  height: 15px;
+  width: 32px;
+  height: 18px;
   border-left: 6px solid var(--success);
   border-bottom: 6px solid var(--success);
   border-radius: 0 0 0 4px;
-  transform: translate(-50%, -62%) rotate(-45deg);
-  animation: successTick 560ms cubic-bezier(.16, .95, .22, 1.08) 120ms both;
+  transform: translate(-50%, -58%) rotate(-45deg);
+  animation: successTick 680ms cubic-bezier(.16, .95, .22, 1.08) 150ms both;
 }
 .loading-modal.success .spinner::after {
   content: "";
   position: absolute;
-  inset: -8px;
+  inset: -10px;
   border: 2px solid rgba(22, 163, 106, .24);
   border-radius: 50%;
-  animation: successRing 1400ms ease-out 120ms both;
+  animation: successRing 1800ms ease-out 120ms both;
 }
 .loading-confetti {
   position: absolute;
@@ -1027,7 +1048,7 @@ h3 { margin: 0; font-size: 15px; }
 .loading-confetti span {
   position: absolute;
   left: 50%;
-  top: 64px;
+  top: 72px;
   width: 7px;
   height: 12px;
   border-radius: 3px;

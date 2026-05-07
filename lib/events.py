@@ -43,6 +43,7 @@ DEFAULT_SPORT_TITLES = {
 
 
 def get_events_for_app(db: SupabaseRestClient, sport_key: str | None = None) -> list[dict[str, Any]]:
+    cleanup_expired_line_events(db)
     params = {
         "select": "*",
         "status": "eq.upcoming",
@@ -129,6 +130,7 @@ def get_events_for_app(db: SupabaseRestClient, sport_key: str | None = None) -> 
 
 
 def get_sports_for_app(db: SupabaseRestClient) -> list[dict[str, Any]]:
+    cleanup_expired_line_events(db)
     sports = db.select("sports", {"select": "*", "is_enabled": "eq.true", "order": "sport_key.asc"})
     if not sports:
         sports = default_sports()
@@ -145,8 +147,22 @@ def get_sports_for_app(db: SupabaseRestClient) -> list[dict[str, Any]]:
             "limit": "1000",
         },
     )
+    event_ids = [event["id"] for event in events]
+    odds_event_ids = set()
+    if event_ids:
+        odds_rows = db.select(
+            "odds_current",
+            {
+                "select": "event_id,market_key",
+                "event_id": f"in.({','.join(event_ids)})",
+                "limit": "5000",
+            },
+        )
+        odds_event_ids = {row["event_id"] for row in odds_rows if not is_lay_market(row.get("market_key") or "")}
     counts = {}
     for event in events:
+        if event["id"] not in odds_event_ids:
+            continue
         counts[event["sport_key"]] = counts.get(event["sport_key"], 0) + 1
 
     return [
@@ -158,6 +174,49 @@ def get_sports_for_app(db: SupabaseRestClient) -> list[dict[str, Any]]:
         }
         for sport in sports
     ]
+
+
+def cleanup_expired_line_events(db: SupabaseRestClient) -> dict[str, int]:
+    now = datetime.now(timezone.utc).isoformat()
+    expired = db.select(
+        "events",
+        {
+            "select": "id",
+            "status": "eq.upcoming",
+            "commence_time": f"lte.{now}",
+            "limit": "500",
+        },
+    )
+    if not expired:
+        return {"expired": 0, "deleted": 0, "closed": 0}
+
+    event_ids = [event["id"] for event in expired]
+    selection_rows = db.select(
+        "bet_selections",
+        {
+            "select": "event_id",
+            "event_id": f"in.({','.join(event_ids)})",
+            "limit": "1000",
+        },
+    )
+    protected_ids = {row["event_id"] for row in selection_rows}
+    delete_ids = [event_id for event_id in event_ids if event_id not in protected_ids]
+    close_ids = [event_id for event_id in event_ids if event_id in protected_ids]
+
+    if delete_ids:
+        ids_filter = f"in.({','.join(delete_ids)})"
+        db.delete("odds_current", {"event_id": ids_filter})
+        db.delete("events", {"id": ids_filter})
+
+    if close_ids:
+        db.update(
+            "events",
+            {"status": "closed", "updated_at": now},
+            {"id": f"in.({','.join(close_ids)})"},
+            return_rows=False,
+        )
+
+    return {"expired": len(event_ids), "deleted": len(delete_ids), "closed": len(close_ids)}
 
 
 def default_sports() -> list[dict[str, Any]]:

@@ -90,6 +90,7 @@ def update_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], team_i
     if "logo_url" in payload:
         patch["logo_url"] = logo_url or None
     if sport_type:
+        validate_team_sport_type_change(db, team_id, sport_type)
         patch["sport_type"] = sport_type
     if len(patch) == 1:
         raise AppError("empty_payload", "Нет данных для обновления", 400)
@@ -109,7 +110,7 @@ def create_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], payloa
     name_ru = clean_text(payload.get("name_ru"))
     short_name_ru = clean_text(payload.get("short_name_ru"))
     logo_url = clean_text(payload.get("logo_url"))
-    sport_type = clean_sport_type(payload.get("sport_type")) or sport_type_from_key(sport_key)
+    sport_type = sport_type_from_key(sport_key)
     if not raw_name or not sport_key:
         raise AppError("invalid_alias", "Нужны raw_name и sport_key", 400)
 
@@ -117,6 +118,12 @@ def create_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], payloa
         team = first(db.select("teams", {"select": "*", "id": f"eq.{team_id}", "limit": "1"}))
         if not team:
             raise AppError("team_not_found", "Команда не найдена", 404)
+        if team.get("sport_type") and team.get("sport_type") != sport_type:
+            raise AppError(
+                "team_sport_mismatch",
+                "Нельзя привязать команду другого вида спорта к этому турниру",
+                400,
+            )
         team_patch = {"updated_at": datetime.now(timezone.utc).isoformat()}
         if name_ru:
             team_patch["name_ru"] = name_ru
@@ -124,8 +131,6 @@ def create_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], payloa
             team_patch["short_name_ru"] = short_name_ru
         if "logo_url" in payload:
             team_patch["logo_url"] = logo_url or team.get("logo_url")
-        if sport_type:
-            team_patch["sport_type"] = sport_type
         if len(team_patch) > 1:
             team = first(db.update("teams", team_patch, {"id": f"eq.{team_id}"})) or team
     else:
@@ -162,6 +167,21 @@ def create_team_alias(db: SupabaseRestClient, admin_user: dict[str, Any], payloa
     apply_team_alias_to_existing_events(db, sport_key, raw_name, team["id"])
     log_admin_action(db, admin_user, "create_team_alias", "team", team["id"], {"raw_name": raw_name, "sport_key": sport_key})
     return {"team": team, "alias": alias}
+
+
+def validate_team_sport_type_change(db: SupabaseRestClient, team_id: str, sport_type: str) -> None:
+    aliases = db.select("team_source_aliases", {"select": "sport_key", "team_id": f"eq.{team_id}", "limit": "100"})
+    mismatched = [
+        alias.get("sport_key")
+        for alias in aliases
+        if alias.get("sport_key") and sport_type_from_key(alias["sport_key"]) != sport_type
+    ]
+    if mismatched:
+        raise AppError(
+            "team_sport_mismatch",
+            "Нельзя сменить вид спорта: у команды уже есть алиасы в другом виде спорта",
+            400,
+        )
 
 
 def clean_text(value: Any) -> str:

@@ -327,7 +327,7 @@ async function init() {
     return false;
   });
   if (!canUseApp) return;
-  await loadSports().catch((error) => status(`Турниры не загружены: ${error.message}`));
+  await loadSports({ render: false }).catch((error) => status(`Турниры не загружены: ${error.message}`));
   await loadEvents().catch((error) => status(`Линия не загружена: ${error.message}`));
   handleHash();
 }
@@ -406,9 +406,9 @@ function telegramFallbackName() {
   return [tgUser?.first_name, tgUser?.last_name].filter(Boolean).join(' ') || tgUser?.username || '';
 }
 
-async function loadSports() {
+async function loadSports({ render = true } = {}) {
   state.sports = await apiFetch('/api/sports');
-  renderSports();
+  if (render) renderSports();
 }
 
 function renderSports() {
@@ -679,9 +679,13 @@ function closeEventCard() {
 }
 
 function toggleSelection(button) {
+  const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
   const event = state.events.find((item) => item.id === button.dataset.event);
+  if (!event) return;
   const market = findEventMarket(event, button.dataset.market, button.dataset.bookmaker);
+  if (!market) return;
   const outcome = market.outcomes.find((item) => item.selection_key === button.dataset.selection);
+  if (!outcome) return;
   const same = state.selections.some((item) => item.event.id === event.id && item.market_key === market.market_key && item.outcome.selection_key === outcome.selection_key);
   if (same) {
     state.selections = state.selections.filter((item) => item.event.id !== event.id);
@@ -690,6 +694,7 @@ function toggleSelection(button) {
     state.selections.push({ event, outcome, bookmaker_key: market.bookmaker_key, market_key: market.market_key, market_title: market.title || marketTitleFor(market.market_key, event.sport_key) });
   }
   renderEvents();
+  window.requestAnimationFrame(() => window.scrollTo(0, scrollY));
   renderTicket();
 }
 
@@ -1466,14 +1471,56 @@ function renderManualAliasForm(data) {
 
   const sports = data?.sports || [];
   const teams = (data?.teams || []).map((row) => row.team).filter(Boolean);
+  state.manualAliasTeams = teams;
   sportSelect.innerHTML = sports.map((sport) => `
     <option value="${escapeAttr(sport.sport_key)}">${escapeHtml(sport.title_ru || sport.title_en || sport.sport_key)}</option>
   `).join('');
   teamSelect.innerHTML = `<option value="">Создать новую команду</option>${teams.map((team) => `
     <option value="${escapeAttr(team.id)}">${escapeHtml(team.name_ru || team.name_en)} · ${escapeHtml(sportTypeLabels[team.sport_type] || team.sport_type || 'спорт')}</option>
   `).join('')}`;
+  sportSelect.onchange = syncManualAliasForm;
+  teamSelect.onchange = syncManualAliasForm;
+  syncManualAliasForm();
   const button = document.querySelector('#create-manual-alias');
   if (button) button.onclick = () => createManualAlias().catch((error) => notify(error.message, 'error'));
+}
+
+function syncManualAliasForm() {
+  const sportKey = document.querySelector('#manual-alias-sport')?.value || '';
+  const teamId = document.querySelector('#manual-alias-team')?.value || '';
+  const team = (state.manualAliasTeams || []).find((item) => item.id === teamId);
+  const expectedType = sportTypeFromKey(sportKey);
+  const sportType = document.querySelector('#manual-alias-sport-type');
+  const name = document.querySelector('#manual-alias-name');
+  const short = document.querySelector('#manual-alias-short');
+  const logo = document.querySelector('#manual-alias-logo');
+  if (!sportType || !name || !short || !logo) return;
+
+  sportType.value = team?.sport_type || expectedType;
+  sportType.disabled = true;
+  sportType.hidden = true;
+  short.closest('input, label')?.setAttribute('hidden', '');
+
+  if (team) {
+    name.value = team.name_ru || '';
+    short.value = team.short_name_ru || '';
+    logo.value = team.logo_url || '';
+    name.placeholder = 'Название команды';
+    logo.placeholder = 'Logo URL команды';
+    const mismatched = team.sport_type && team.sport_type !== expectedType;
+    document.querySelector('#create-manual-alias').disabled = Boolean(mismatched);
+    if (mismatched) {
+      notify('Эта команда относится к другому виду спорта. Выберите команду того же вида спорта.', 'error');
+    }
+    return;
+  }
+
+  name.value = '';
+  short.value = '';
+  logo.value = '';
+  name.placeholder = 'Название новой команды';
+  logo.placeholder = 'Logo URL команды';
+  document.querySelector('#create-manual-alias').disabled = false;
 }
 
 function renderUnknownAliases(unknown) {
@@ -1502,7 +1549,9 @@ function renderUnknownAliases(unknown) {
       `).join('')}
     </details>
   `).join('') : '<p class="muted">Нет пустых команд.</p>';
-  document.querySelectorAll('[data-create-alias]').forEach((button) => button.addEventListener('click', () => createAlias(Number(button.dataset.createAlias))));
+  document.querySelectorAll('[data-create-alias]').forEach((button) => {
+    button.addEventListener('click', () => createAlias(Number(button.dataset.createAlias)).catch((error) => notify(error.message, 'error')));
+  });
 }
 
 function renderSportAliases(sports) {
@@ -1513,9 +1562,9 @@ function renderSportAliases(sports) {
         <span>${sport.is_enabled ? 'активен' : 'выключен'}</span>
       </div>
       <div class="form-grid">
-        <input data-sport-title="${sport.sport_key}" value="${escapeAttr(sport.title_ru || '')}" placeholder="Название на русском">
-        <input data-sport-logo="${sport.sport_key}" value="${escapeAttr(sport.logo_url || '')}" placeholder="Logo URL турнира">
-        <button class="primary" data-save-sport="${sport.sport_key}">Сохранить</button>
+        <input data-sport-title="${escapeAttr(sport.sport_key)}" value="${escapeAttr(sport.title_ru || '')}" placeholder="Название на русском">
+        <input data-sport-logo="${escapeAttr(sport.sport_key)}" value="${escapeAttr(sport.logo_url || '')}" placeholder="Logo URL турнира">
+        <button class="primary" data-save-sport="${escapeAttr(sport.sport_key)}">Сохранить</button>
         ${(sport.source === 'manual' || sport.sport_key?.startsWith('manual_')) ? `<button class="back-button danger-button" data-delete-sport="${escapeAttr(sport.sport_key)}" type="button">Удалить соревнование</button>` : ''}
       </div>
     </article>
@@ -1582,8 +1631,20 @@ async function createAlias(index) {
 async function createManualAlias() {
   const sportKey = document.querySelector('#manual-alias-sport').value;
   const rawName = document.querySelector('#manual-alias-raw').value.trim();
+  const teamId = document.querySelector('#manual-alias-team').value;
+  const team = (state.manualAliasTeams || []).find((item) => item.id === teamId);
+  const expectedType = sportTypeFromKey(sportKey);
+  const name = document.querySelector('#manual-alias-name').value.trim();
   if (!sportKey || !rawName) {
     notify('Выберите турнир и укажите название из API', 'error');
+    return;
+  }
+  if (team && team.sport_type && team.sport_type !== expectedType) {
+    notify('Команда относится к другому виду спорта. Выберите команду того же вида спорта.', 'error');
+    return;
+  }
+  if (!team && !name) {
+    notify('Введите название новой команды', 'error');
     return;
   }
   showLoading('Алиас', 'Сохраняю алиас команды...');
@@ -1593,10 +1654,9 @@ async function createManualAlias() {
       body: JSON.stringify({
         raw_name: rawName,
         sport_key: sportKey,
-        team_id: document.querySelector('#manual-alias-team').value,
-        sport_type: document.querySelector('#manual-alias-sport-type').value,
-        name_ru: document.querySelector('#manual-alias-name').value,
-        short_name_ru: document.querySelector('#manual-alias-short').value,
+        team_id: teamId,
+        name_ru: name,
+        short_name_ru: document.querySelector('#manual-alias-short').value || name,
         logo_url: document.querySelector('#manual-alias-logo').value,
       }),
     });
@@ -1613,17 +1673,31 @@ async function createManualAlias() {
 }
 
 async function saveSport(sportKey) {
+  const titleInput = findByDataValue('sport-title', sportKey);
+  const logoInput = findByDataValue('sport-logo', sportKey);
+  if (!titleInput || !logoInput) {
+    notify('Не удалось найти поля турнира. Обновите алиасы и попробуйте ещё раз.', 'error');
+    return;
+  }
   await apiFetch(`/api/admin/sports/${encodeURIComponent(sportKey)}`, {
     method: 'PATCH',
     body: JSON.stringify({
-      title_ru: document.querySelector(`[data-sport-title="${sportKey}"]`).value,
-      logo_url: document.querySelector(`[data-sport-logo="${sportKey}"]`).value,
+      title_ru: titleInput.value,
+      logo_url: logoInput.value,
     }),
   });
-  status('Турнир обновлен');
+  notify('Турнир обновлен', 'success');
   await loadAliases();
   await loadSports();
   await loadEvents();
+}
+
+function findByDataValue(name, value) {
+  return Array.from(document.querySelectorAll(`[data-${name}]`)).find((item) => item.dataset[toDatasetKey(name)] === value) || null;
+}
+
+function toDatasetKey(name) {
+  return name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 }
 
 async function saveTeam(index) {
@@ -1880,7 +1954,7 @@ async function deleteManualSport(sportKey) {
   if (!window.confirm('Удалить соревнование? Если внутри есть события со ставками, они будут отменены, а соревнование будет отключено.')) return;
   showLoading('Соревнование', 'Удаляю ручное соревнование и связанные события...');
   try {
-    const result = await apiFetch(`/api/admin/manual-sports/${encodeURIComponent(sportKey)}`, { method: 'DELETE' });
+    const result = await apiFetch(`/api/admin/sports/${encodeURIComponent(sportKey)}`, { method: 'DELETE' });
     state.manualData = result;
     if (document.querySelector('#admin-page-constructor')?.classList.contains('active')) renderManualConstructor();
     if (state.aliases) await loadAliases().catch(() => {});

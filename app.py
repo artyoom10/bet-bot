@@ -432,12 +432,20 @@ def api_admin_aliases():
     return jsonify({"ok": True, **get_aliases_dashboard(db)})
 
 
-@app.patch("/api/admin/sports/<sport_key>")
+@app.patch("/api/admin/sports/<path:sport_key>")
 def api_admin_update_sport_alias(sport_key: str):
     db = get_db()
     admin_user = require_admin(request, db)
     payload = request.get_json(silent=True) or {}
     return jsonify({"ok": True, "sport": update_sport_alias(db, admin_user, sport_key, payload)})
+
+
+@app.delete("/api/admin/sports/<path:sport_key>")
+def api_admin_delete_sport_alias(sport_key: str):
+    db = get_db()
+    admin_user = require_admin(request, db)
+    result = delete_manual_sport(db, admin_user, sport_key)
+    return jsonify({"ok": True, **result, **manual_events_payload(db)})
 
 
 @app.patch("/api/admin/teams/<team_id>")
