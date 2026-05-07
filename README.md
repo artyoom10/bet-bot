@@ -81,7 +81,7 @@ flask --app app run --debug
 ## Vercel deploy
 
 The production Vercel entrypoint is `api/index.py`, which imports the Flask app from root `app.py`.
-`vercel.json` must not use legacy `builds`; it uses `functions` plus a rewrite to `/api/index`.
+`vercel.json` must not use legacy `builds`; it uses a rewrite to `/api/index` so Vercel auto-detects the Python Serverless Function.
 
 To force a fresh production deployment from this repository:
 

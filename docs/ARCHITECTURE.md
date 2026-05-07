@@ -22,7 +22,8 @@
 - `templates/`: HTML shell Mini App.
 - `supabase/`: schema, seed и SQL migration.
 - `docs/`: handoff и архитектурные заметки для следующих сессий.
-- `vercel.json`: Vercel routing/build config.
+- `vercel.json`: Vercel rewrite config without legacy `builds`; all requests go to `/api/index`.
+- `api/index.py`: Vercel Python Serverless Function entrypoint that imports Flask `app` from root `app.py`.
 
 ## Основные модули
 

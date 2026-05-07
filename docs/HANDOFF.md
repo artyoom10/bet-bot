@@ -145,3 +145,9 @@
 - В линии состояние свернутых турниров теперь хранится в frontend state и не сбрасывается при выборе/удалении позиции в купоне.
 - В админке “Алиасы и команды” у турниров отображается превью `logo_url` рядом с названием; сохранение по-прежнему пишет URL в `sports.logo_url`, а линия показывает это лого слева от названия турнира.
 - Добавлен cache-busting query к `static/styles.css` и `static/app.js` в `templates/index.html`, чтобы Telegram/Vercel не показывали старые frontend assets после деплоя.
+
+## Обновление 2026-05-07: Vercel deploy config
+
+- Удалён legacy `builds` из `vercel.json`; также убран точечный `functions` pattern, который давал ошибку Vercel “doesn't match any Serverless Functions”.
+- Добавлен `api/index.py` как Vercel Python entrypoint. Он импортирует Flask `app` из корневого `app.py`; `vercel.json` теперь только переписывает все пути на `/api/index`.
+- Success-анимация ставки переработана: галочка центрирована в крупном зелёном круге, добавлены ring pulse и более аккуратное confetti; Telegram haptic запускается после появления success/confetti, а не до него.

@@ -835,8 +835,8 @@ h3 { margin: 0; font-size: 15px; }
   backdrop-filter: blur(10px);
 }
 .loading-modal { z-index: 60; }
-.loading-modal.success { background: rgba(13, 84, 55, .28); }
-.loading-modal.success .loading-card { animation: successPop 260ms cubic-bezier(.2, .9, .2, 1) both; }
+.loading-modal.success { background: rgba(16, 85, 60, .34); }
+.loading-modal.success .loading-card { animation: successPop 420ms cubic-bezier(.16, .95, .22, 1.08) both; }
 .welcome-screen {
   z-index: 30;
   overflow: hidden;
@@ -987,21 +987,35 @@ h3 { margin: 0; font-size: 15px; }
 }
 .loading-modal.success .spinner {
   position: relative;
-  border-color: rgba(22, 163, 106, .18);
-  border-top-color: rgba(22, 163, 106, .18);
-  background: #e8fff4;
-  animation: none;
+  width: 76px;
+  height: 76px;
+  border: 0;
+  background:
+    radial-gradient(circle at 50% 50%, #ffffff 0 44%, transparent 45%),
+    linear-gradient(135deg, #78e0aa 0%, #13a66b 100%);
+  box-shadow: 0 18px 40px rgba(22, 163, 106, .32), inset 0 0 0 1px rgba(255, 255, 255, .7);
+  animation: successCheckPop 760ms cubic-bezier(.16, .95, .22, 1.08) both;
 }
 .loading-modal.success .spinner::before {
   content: "";
   position: absolute;
-  left: 11px;
-  top: 12px;
-  width: 17px;
-  height: 9px;
-  border-left: 4px solid var(--success);
-  border-bottom: 4px solid var(--success);
-  transform: rotate(-45deg);
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 15px;
+  border-left: 6px solid var(--success);
+  border-bottom: 6px solid var(--success);
+  border-radius: 0 0 0 4px;
+  transform: translate(-50%, -62%) rotate(-45deg);
+  animation: successTick 560ms cubic-bezier(.16, .95, .22, 1.08) 120ms both;
+}
+.loading-modal.success .spinner::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border: 2px solid rgba(22, 163, 106, .24);
+  border-radius: 50%;
+  animation: successRing 1400ms ease-out 120ms both;
 }
 .loading-confetti {
   position: absolute;
@@ -1024,8 +1038,22 @@ h3 { margin: 0; font-size: 15px; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes successPop {
-  from { transform: translateY(8px) scale(.98); }
-  to { transform: translateY(0) scale(1); }
+  from { opacity: .86; transform: translateY(10px) scale(.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes successCheckPop {
+  0% { transform: scale(.7); opacity: 0; }
+  58% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes successTick {
+  0% { clip-path: inset(0 100% 0 0); opacity: 0; }
+  45% { opacity: 1; }
+  100% { clip-path: inset(0 0 0 0); opacity: 1; }
+}
+@keyframes successRing {
+  0% { opacity: .72; transform: scale(.82); }
+  100% { opacity: 0; transform: scale(1.45); }
 }
 @keyframes confettiBurst {
   0% { opacity: 0; transform: translate(-50%, 0) rotate(0); }

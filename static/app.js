@@ -173,6 +173,13 @@ function showLoadingSuccess(title = 'Готово', text = '') {
     confetti.appendChild(piece);
   }
   card.appendChild(confetti);
+  triggerSuccessHaptics();
+}
+
+function triggerSuccessHaptics() {
+  tg?.HapticFeedback?.notificationOccurred('success');
+  window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('light'), 180);
+  window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('medium'), 460);
 }
 
 function hideLoading() {
@@ -807,7 +814,6 @@ async function submitBet() {
     state.me.wallet = result.wallet;
     document.querySelector('#balance-value').innerHTML = moneyHtml(result.wallet.balance);
     renderProfileView();
-    tg?.HapticFeedback?.notificationOccurred('success');
     clearTicket();
     await loadBets();
     showLoadingSuccess('Ставка принята');
