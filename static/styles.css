@@ -1357,6 +1357,16 @@ h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
   gap: 12px;
 }
 .league-hero-title h2 { margin-bottom: 0; font-size: 28px; }
+.league-hero-title h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.league-hero-title h2 .rank-avatar {
+  width: 34px;
+  height: 34px;
+  flex-basis: 34px;
+}
 .league-hero-title strong { color: var(--accent-2); font-size: 20px; font-weight: 950; }
 .league-progress { height: 12px; }
 .league-scale { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; font-weight: 850; }
@@ -1433,8 +1443,14 @@ h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
   gap: 10px;
 }
 .league-rank-group {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
   border: 0;
   padding: 0;
+}
+.league-rank-group.static {
+  display: block;
 }
 .league-rank-group summary {
   display: block;
@@ -1446,7 +1462,7 @@ h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
 .league-substeps {
   display: grid;
   gap: 8px;
-  margin: 8px 0 2px 54px;
+  margin: 0 0 0 54px;
 }
 .league-substep-title {
   color: var(--muted);

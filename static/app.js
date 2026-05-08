@@ -1066,9 +1066,9 @@ function renderLeague() {
   const scaleEnd = current.next_threshold || current.threshold || 0;
   root.innerHTML = `
     <article class="league-hero-card">
-      <p class="label">Лига</p>
+      <p class="label">Уровень</p>
       <div class="league-hero-title">
-        <h2>${escapeHtml(current.title || 'Железо')}</h2>
+        <h2>${rankAvatarHtml(current, current.title || 'Железо')}${escapeHtml(current.title || 'Железо')}</h2>
         <strong>${moneyHtml(current.total_profit || current.total_win || 0)}</strong>
       </div>
       <div class="profile-progress league-progress"><i style="width:${Number(current.progress_percent || 0)}%"></i></div>
@@ -1095,7 +1095,7 @@ function renderLeague() {
       <h2>Шкала прогресса</h2>
       <p class="league-description">Прогресс считается по чистой прибыли: выплата минус сумма ставки. Например, ставка ${money(1000)} с кэфом 1.50 даёт выплату ${money(1500)}, а в прогресс идёт ${money(500)}.</p>
       <div class="league-timeline">
-        ${renderLeagueTimeline(rewards, state.league.tiers || [])}
+        ${renderLeagueTimeline(rewards, state.league.tiers || [], current)}
       </div>
     </article>
   `;
@@ -1155,16 +1155,33 @@ function renderWheelList(spins) {
   }).join('');
 }
 
-function renderLeagueTimeline(rewards, tiers = []) {
-  const ranks = rewards.filter((reward) => reward.kind === 'rank');
+function renderLeagueTimeline(rewards, tiers = [], current = {}) {
+  const totalProfit = Number(current.total_profit ?? current.total_win ?? 0);
+  const rankRewards = new Map(rewards.filter((reward) => reward.kind === 'rank').map((reward) => [Number(reward.threshold), reward]));
+  const ranks = (tiers.length ? tiers : rewards.filter((reward) => reward.kind === 'rank')).map((tier) => {
+    const existing = rankRewards.get(Number(tier.threshold)) || {};
+    return {
+      ...existing,
+      ...tier,
+      kind: 'rank',
+      stars: 0,
+      wheel_type: null,
+      wheel_title: null,
+      claimed: existing.claimed ?? totalProfit >= Number(tier.threshold || 0),
+      eligible: existing.eligible ?? totalProfit >= Number(tier.threshold || 0),
+      claimable: false,
+    };
+  });
   const bonuses = rewards.filter((reward) => reward.kind !== 'rank');
   let previousThreshold = 0;
-  let previousTitle = tiers[0]?.title || 'Железо';
   return ranks.map((rank) => {
+    if (Number(rank.threshold) === 0) {
+      previousThreshold = 0;
+      return `<div class="league-rank-group static">${renderLeagueReward(rank, { summary: true })}</div>`;
+    }
     const nested = bonuses.filter((reward) => reward.threshold > previousThreshold && reward.threshold <= rank.threshold);
-    const intervalTitle = `От ${previousTitle} до ${rank.title}`;
+    const intervalTitle = `Задания до уровня ${rank.title}`;
     previousThreshold = rank.threshold;
-    previousTitle = rank.title;
     const shouldOpen = nested.some((reward) => reward.claimable);
     return `
       <details class="league-rank-group" ${shouldOpen ? 'open' : ''}>
