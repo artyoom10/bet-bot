@@ -954,6 +954,7 @@ function renderBetSelection(selection) {
       <div class="selection-details">
         <span>${escapeHtml(marketTitleFor(selection.market_key))}</span>
         <strong>${escapeHtml(selectionDisplayName(selection, home, away))}</strong>
+        <small>${Number(selection.price || 0).toFixed(2)}</small>
         <em class="result-icon ${result.type}" title="${escapeAttr(result.label)}" aria-label="${escapeAttr(result.label)}">${resultIcon(result.type)}</em>
       </div>
     </article>
@@ -1244,7 +1245,7 @@ function renderRating() {
         ${leaderboard.length ? leaderboard.map((row) => `
           <div class="leaderboard-row">
             <span class="leaderboard-rank rank-${row.rank <= 3 ? row.rank : 'other'}">${row.rank}</span>
-            <strong>${rankAvatarHtml(row, row.name)}${escapeHtml(row.name)}</strong>
+            <strong>${escapeHtml(row.name)}${rankAvatarHtml(row, row.name)}</strong>
             <em>${escapeHtml(row.title)}</em>
             <b class="rating-value ${mode.tone}">${moneyHtml(row[mode.valueKey] ?? row.total_profit ?? row.total_win ?? 0)}</b>
           </div>

@@ -429,6 +429,14 @@ h3 { margin: 0; font-size: 15px; }
 }
 .selection-details span { color: var(--muted); }
 .selection-details strong { color: var(--text); }
+.selection-details small {
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--accent-2);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 950;
+}
 .selection-details em { margin-left: auto; font-style: normal; font-weight: 850; }
 .result-icon {
   display: inline-grid;
