@@ -105,7 +105,8 @@ def get_league_payload(db: SupabaseRestClient, user: dict[str, Any]) -> dict[str
     )
     if user.get("is_admin"):
         pending_spins = [admin_wheel_spin(wheel_type) for wheel_type in WHEELS] + pending_spins
-    leaderboard = build_leaderboard(db)
+    leaderboards = build_leaderboards(db)
+    leaderboard = leaderboards["overall"]
 
     return {
         "current": {
@@ -126,6 +127,7 @@ def get_league_payload(db: SupabaseRestClient, user: dict[str, Any]) -> dict[str
         "wheels": public_wheels(),
         "pending_wheels": [spin_payload(spin) for spin in pending_spins],
         "leaderboard": leaderboard[:50],
+        "leaderboards": {key: rows[:50] for key, rows in leaderboards.items()},
     }
 
 
@@ -246,7 +248,7 @@ def calculate_user_stats(db: SupabaseRestClient, user_id: str) -> dict[str, Any]
     won_bets = db.select(
         "bets",
         {
-            "select": "amount,payout,possible_win",
+            "select": "amount,payout,possible_win,total_odds",
             "user_id": f"eq.{user_id}",
             "status": "eq.won",
             "limit": "1000",
@@ -266,6 +268,7 @@ def calculate_user_stats(db: SupabaseRestClient, user_id: str) -> dict[str, Any]
         {"select": "id", "user_id": f"eq.{user_id}", "status": "eq.spun", "limit": "1000"},
     )
     profits = [bet_profit(row) for row in won_bets]
+    odds = [float(row.get("total_odds") or 0) for row in won_bets if float(row.get("total_odds") or 0) > 0]
     losses = [float(row.get("amount") or 0) for row in lost_bets if float(row.get("amount") or 0) > 0]
     total_profit = round(sum(profits), 2)
     return {
@@ -273,11 +276,16 @@ def calculate_user_stats(db: SupabaseRestClient, user_id: str) -> dict[str, Any]
         "total_win": total_profit,
         "biggest_win": round(max(profits), 2) if profits else 0,
         "biggest_loss": round(max(losses), 2) if losses else 0,
+        "biggest_win_odds": round(max(odds), 2) if odds else 0,
         "wheel_spins_count": len(spun),
     }
 
 
 def build_leaderboard(db: SupabaseRestClient) -> list[dict[str, Any]]:
+    return build_leaderboards(db)["overall"]
+
+
+def build_leaderboards(db: SupabaseRestClient) -> dict[str, list[dict[str, Any]]]:
     users = db.select(
         "users",
         {
@@ -288,23 +296,40 @@ def build_leaderboard(db: SupabaseRestClient) -> list[dict[str, Any]]:
     )
     users = [user for user in users if not str(user.get("tg_id") or "").startswith("deleted:")]
     if not users:
-        return []
+        return {"overall": [], "losers": [], "lucky": []}
 
     user_ids = [user["id"] for user in users]
     won_bets = db.select(
         "bets",
         {
-            "select": "user_id,amount,payout,possible_win",
+            "select": "user_id,amount,payout,possible_win,total_odds",
             "status": "eq.won",
             "user_id": f"in.({','.join(user_ids)})",
             "limit": "5000",
         },
     )
+    lost_bets = db.select(
+        "bets",
+        {
+            "select": "user_id,amount",
+            "status": "eq.lost",
+            "user_id": f"in.({','.join(user_ids)})",
+            "limit": "5000",
+        },
+    )
     totals = {user["id"]: 0.0 for user in users}
+    biggest_wins = {user["id"]: 0.0 for user in users}
+    biggest_losses = {user["id"]: 0.0 for user in users}
     for bet in won_bets:
         user_id = bet.get("user_id")
         if user_id in totals:
-            totals[user_id] += bet_profit(bet)
+            profit = bet_profit(bet)
+            totals[user_id] += profit
+            biggest_wins[user_id] = max(biggest_wins[user_id], profit)
+    for bet in lost_bets:
+        user_id = bet.get("user_id")
+        if user_id in biggest_losses:
+            biggest_losses[user_id] = max(biggest_losses[user_id], float(bet.get("amount") or 0))
 
     rows = []
     for profile in users:
@@ -318,10 +343,18 @@ def build_leaderboard(db: SupabaseRestClient) -> list[dict[str, Any]]:
                 "rank_logo_url": tier.get("logo_url"),
                 "total_win": total,
                 "total_profit": total,
+                "biggest_win": round(biggest_wins.get(profile["id"], 0.0), 2),
+                "biggest_loss": round(biggest_losses.get(profile["id"], 0.0), 2),
             }
         )
-    rows.sort(key=lambda item: (-item["total_profit"], item["name"].lower()))
-    return [{**item, "rank": index + 1} for index, item in enumerate(rows)]
+    overall = sorted(rows, key=lambda item: (-item["total_profit"], item["name"].lower()))
+    losers = sorted(rows, key=lambda item: (-item["biggest_loss"], item["name"].lower()))
+    lucky = sorted(rows, key=lambda item: (-item["biggest_win"], item["name"].lower()))
+    return {
+        "overall": [{**item, "rank": index + 1} for index, item in enumerate(overall)],
+        "losers": [{**item, "rank": index + 1} for index, item in enumerate(losers)],
+        "lucky": [{**item, "rank": index + 1} for index, item in enumerate(lucky)],
+    }
 
 
 def daily_reward_payload(db: SupabaseRestClient, user_id: str) -> dict[str, Any]:

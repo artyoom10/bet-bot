@@ -26,6 +26,7 @@ const state = {
   ticketExpanded: false,
   stake: 100,
   activeTab: 'events',
+  ratingMode: 'overall',
   collapsedLeagues: new Set(),
   scrollLocks: new Set(),
   lockedScrollY: 0,
@@ -944,6 +945,7 @@ function renderBetSelection(selection) {
   const result = selectionResultView(selection);
   return `
     <article class="selection-card ${result.type}">
+      <time class="selection-start">${formatDate(selection.commence_time)}</time>
       <div class="selection-teams">
         <span>${teamLogo(home)}<strong>${escapeHtml(home.name || 'Команда 1')}</strong></span>
         <b>${score}</b>
@@ -1029,12 +1031,13 @@ function renderProfileView() {
       <div class="profile-progress"><i style="width:${progress}%"></i></div>
       <em>${escapeHtml(nextTitle)}: ${moneyHtml(league.remaining || 0)}</em>
     </div>
-    <div class="profile-stats-grid">
-      <div class="profile-stat"><span>Лига</span><strong>${escapeHtml(league.league || league.title || 'Железо')}</strong></div>
-      <div class="profile-stat"><span>Крупнейший выигрыш</span><strong>${moneyHtml(league.biggest_win || 0)}</strong></div>
-      <div class="profile-stat"><span>Крупнейший проигрыш</span><strong>${moneyHtml(league.biggest_loss || 0)}</strong></div>
-      <div class="profile-stat"><span>Место</span><strong>${league.rank ? `#${league.rank}` : 'пока нет'}</strong></div>
-    </div>
+      <div class="profile-stats-grid">
+        <div class="profile-stat"><span>Лига</span><strong>${escapeHtml(league.league || league.title || 'Железо')}</strong></div>
+        <div class="profile-stat"><span>Крупнейший выигрыш</span><strong>${moneyHtml(league.biggest_win || 0)}</strong></div>
+        <div class="profile-stat"><span>Крупнейший проигрыш</span><strong>${moneyHtml(league.biggest_loss || 0)}</strong></div>
+        <div class="profile-stat"><span>Крупнейший кэф</span><strong>${league.biggest_win_odds ? Number(league.biggest_win_odds).toFixed(2) : 'пока нет'}</strong></div>
+        <div class="profile-stat"><span>Место</span><strong>${league.rank ? `#${league.rank}` : 'пока нет'}</strong></div>
+      </div>
   `;
   document.querySelector('#profile-view-name').innerHTML = `${escapeHtml(profileName)}${rankAvatarHtml(league, profileName)}`;
   document.querySelector('#profile-view-balance').innerHTML = `<span class="profile-balance-label">Текущий баланс</span>${moneyHtml(wallet.balance)}`;
@@ -1093,7 +1096,7 @@ function renderLeague() {
       <h2>Шкала прогресса</h2>
       <p class="league-description">Прогресс считается по чистой прибыли: выплата минус сумма ставки. Например, ставка ${money(1000)} с кэфом 1.50 даёт выплату ${money(1500)}, а в прогресс идёт ${money(500)}.</p>
       <div class="league-timeline">
-        ${renderLeagueTimeline(rewards)}
+        ${renderLeagueTimeline(rewards, state.league.tiers || [])}
       </div>
     </article>
   `;
@@ -1157,18 +1160,22 @@ function wheelInitial(type = '') {
   return ({ small: 'М', standard: 'О', large: 'Б', elite: 'Э' }[type] || 'К');
 }
 
-function renderLeagueTimeline(rewards) {
+function renderLeagueTimeline(rewards, tiers = []) {
   const ranks = rewards.filter((reward) => reward.kind === 'rank');
   const bonuses = rewards.filter((reward) => reward.kind !== 'rank');
   let previousThreshold = 0;
+  let previousTitle = tiers[0]?.title || 'Железо';
   return ranks.map((rank) => {
     const nested = bonuses.filter((reward) => reward.threshold > previousThreshold && reward.threshold <= rank.threshold);
+    const intervalTitle = `От ${previousTitle} до ${rank.title}`;
     previousThreshold = rank.threshold;
+    previousTitle = rank.title;
     const shouldOpen = nested.some((reward) => reward.claimable);
     return `
       <details class="league-rank-group" ${shouldOpen ? 'open' : ''}>
         <summary>${renderLeagueReward(rank, { summary: true })}</summary>
         <div class="league-substeps">
+          <div class="league-substep-title">${escapeHtml(intervalTitle)}</div>
           ${nested.length ? nested.map((reward) => renderLeagueReward(reward, { compact: true })).join('') : '<div class="league-empty-substep">Промежуточных наград нет</div>'}
         </div>
       </details>
@@ -1198,29 +1205,45 @@ function renderLeagueReward(reward, options = {}) {
 function renderRating() {
   const root = document.querySelector('#rating');
   if (!root || !state.league) return;
-  const leaderboard = state.league.leaderboard || [];
+  const modes = {
+    overall: { title: 'Общий рейтинг', description: 'Места считаются по чистой прибыли за всё время.', valueKey: 'total_profit', tone: 'accent' },
+    losers: { title: 'Рейтинг лохов', description: 'Самые крупные проигрыши за одну ставку.', valueKey: 'biggest_loss', tone: 'loss' },
+    lucky: { title: 'Рейтинг фарта', description: 'Самые крупные выигрыши за одну ставку.', valueKey: 'biggest_win', tone: 'win' },
+  };
+  const mode = modes[state.ratingMode] || modes.overall;
+  const leaderboards = state.league.leaderboards || { overall: state.league.leaderboard || [] };
+  const leaderboard = leaderboards[state.ratingMode] || [];
   root.innerHTML = `
     <article class="league-hero-card">
       <p class="label">Рейтинг</p>
       <div class="league-hero-title">
-        <h2>Общий рейтинг</h2>
+        <h2>${escapeHtml(mode.title)}</h2>
         <strong>${leaderboard.length}</strong>
       </div>
-      <p>Места считаются по чистой прибыли за всё время.</p>
+      <p>${escapeHtml(mode.description)}</p>
     </article>
     <article class="panel">
+      <div class="rating-tabs">
+        ${Object.entries(modes).map(([key, item]) => `
+          <button class="${state.ratingMode === key ? 'active' : ''}" type="button" data-rating-mode="${key}">${escapeHtml(item.title)}</button>
+        `).join('')}
+      </div>
       <div class="leaderboard-list">
         ${leaderboard.length ? leaderboard.map((row) => `
           <div class="leaderboard-row">
             <span class="leaderboard-rank rank-${row.rank <= 3 ? row.rank : 'other'}">${row.rank}</span>
             <strong>${rankAvatarHtml(row, row.name)}${escapeHtml(row.name)}</strong>
             <em>${escapeHtml(row.title)}</em>
-            <b>${moneyHtml(row.total_profit ?? row.total_win ?? 0)}</b>
+            <b class="rating-value ${mode.tone}">${moneyHtml(row[mode.valueKey] ?? row.total_profit ?? row.total_win ?? 0)}</b>
           </div>
         `).join('') : '<div class="empty-state">Рейтинг пока пуст.</div>'}
       </div>
     </article>
   `;
+  root.querySelectorAll('[data-rating-mode]').forEach((button) => button.addEventListener('click', () => {
+    state.ratingMode = button.dataset.ratingMode;
+    renderRating();
+  }));
 }
 
 async function claimReward(threshold) {
@@ -1254,7 +1277,11 @@ async function claimDailyReward() {
 async function spinWheel(spinId) {
   const spin = (state.league?.pending_wheels || []).find((item) => item.id === spinId);
   const wheel = state.league?.wheels?.[spin?.wheel_type] || null;
-  await showWheelLoading(wheel, spin);
+  const shouldSpin = await showWheelLoading(wheel, spin);
+  if (!shouldSpin) {
+    hideLoading();
+    return;
+  }
   try {
     const result = await apiFetch(`/api/league/wheel-spins/${spinId}/spin`, { method: 'POST', body: JSON.stringify({}) });
     const prizeIndex = wheelPrizeIndex(wheel, result.prize);
@@ -1284,21 +1311,26 @@ function showWheelLoading(wheel, spin) {
       ${segments.map((segment, index) => {
         const segmentSize = 360 / Math.max(segments.length, 1);
         const angle = Math.round((segmentSize * index) + (segmentSize / 2));
-        return `<span style="--angle:${angle}deg"><b>${money(segment.stars)}</b><small>${segment.chance_percent}%</small></span>`;
+        return `<span style="--angle:${angle}deg"><b>${money(segment.stars)}</b></span>`;
       }).join('')}
     </div>
     <div class="wheel-prize" hidden></div>
+    <button class="wheel-close-button" type="button" aria-label="Закрыть">×</button>
     <button class="primary wheel-start-button" type="button">Крутить</button>
   `;
   card.appendChild(stage);
   return new Promise((resolve) => {
-    stage.querySelector('.wheel-start-button').addEventListener('click', () => {
-      stage.querySelector('.wheel-start-button').disabled = true;
+    const closeButton = stage.querySelector('.wheel-close-button');
+    const startButton = stage.querySelector('.wheel-start-button');
+    closeButton.addEventListener('click', () => resolve(false), { once: true });
+    startButton.addEventListener('click', () => {
+      startButton.disabled = true;
+      closeButton.hidden = true;
       document.querySelector('#loading-text').textContent = 'Колесо набирает скорость...';
       tg?.HapticFeedback?.impactOccurred('light');
       window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('medium'), 650);
       window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('light'), 1250);
-      resolve();
+      resolve(true);
     }, { once: true });
   });
 }
@@ -1310,12 +1342,17 @@ function startWheelSpin(prizeIndex, totalSegments) {
   const prizeCenterAngle = (prizeIndex * segmentSize) + (segmentSize / 2);
   const stopRotation = 360 * 5 - prizeCenterAngle;
   wheelNode?.style.setProperty('--stop-rotation', `${Math.round(stopRotation)}deg`);
+  if (wheelNode) wheelNode.dataset.stopRotation = `${Math.round(stopRotation)}deg`;
   modal.classList.remove('wheel-ready');
   modal.classList.add('wheel-spinning');
 }
 
 function finishWheelLoading(prize) {
   const modal = document.querySelector('#loading-modal');
+  const wheelNode = modal.querySelector('.fortune-wheel');
+  if (wheelNode?.dataset.stopRotation) {
+    wheelNode.style.transform = `rotate(${wheelNode.dataset.stopRotation})`;
+  }
   modal.classList.remove('wheel-spinning');
   modal.classList.add('wheel-finished');
   document.querySelector('#loading-text').textContent = `Выпало ${money(prize)}`;

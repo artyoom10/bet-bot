@@ -386,6 +386,12 @@ h3 { margin: 0; font-size: 15px; }
   background: var(--surface-2);
   font-size: 13px;
 }
+.selection-start {
+  justify-self: start;
+  color: var(--accent-2);
+  font-size: 11px;
+  font-weight: 900;
+}
 .selection-list > span {
   display: grid;
   gap: 2px;
@@ -1090,16 +1096,24 @@ h3 { margin: 0; font-size: 15px; }
   left: 50%;
   display: grid;
   justify-items: center;
-  gap: 1px;
-  width: 62px;
+  width: 58px;
   color: var(--text);
   font-size: 10px;
   font-weight: 950;
   line-height: 1.05;
   text-align: center;
-  transform: translate(-50%, -50%) rotate(var(--angle)) translateY(-72px) rotate(calc(-1 * var(--angle)));
+  transform: translate(-50%, -50%) rotate(var(--angle)) translateY(-72px);
 }
-.fortune-wheel span small { color: var(--muted); font-size: 9px; font-weight: 850; }
+.fortune-wheel span b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  border-radius: 999px;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, .78);
+  box-shadow: 0 4px 12px rgba(27, 72, 124, .1);
+}
 .wheel-prize {
   position: absolute;
   z-index: 3;
@@ -1120,6 +1134,24 @@ h3 { margin: 0; font-size: 15px; }
   min-height: 48px;
   border-radius: 16px;
 }
+.wheel-close-button {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--muted);
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(16, 24, 40, .12);
+  font-size: 22px;
+  font-weight: 850;
+}
+.wheel-close-button:active { transform: scale(.96); }
 .loading-confetti {
   position: absolute;
   inset: 0;
@@ -1415,6 +1447,11 @@ h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
   gap: 8px;
   margin: 8px 0 2px 54px;
 }
+.league-substep-title {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
 .league-empty-substep {
   color: var(--muted);
   font-size: 12px;
@@ -1477,6 +1514,30 @@ h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
 .league-step em { color: var(--muted); font-style: normal; font-size: 12px; font-weight: 850; }
 .league-step .primary { min-height: 36px; padding: 8px 10px; border-radius: 12px; }
 .wheel-list, .leaderboard-list { display: grid; gap: 8px; }
+.rating-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+  border-radius: 16px;
+  padding: 4px;
+  background: var(--surface-2);
+}
+.rating-tabs button {
+  min-width: 0;
+  border: 0;
+  border-radius: 13px;
+  padding: 9px 6px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 900;
+}
+.rating-tabs button.active {
+  color: var(--accent-2);
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(27, 72, 124, .08);
+}
 .wheel-button, .leaderboard-row {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr) auto;
@@ -1511,6 +1572,9 @@ h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
 .leaderboard-row { grid-template-columns: 38px minmax(0, 1fr) auto; }
 .leaderboard-row strong { display: inline-flex; align-items: center; gap: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .leaderboard-row b { grid-column: 2 / 4; justify-self: end; }
+.leaderboard-row b.win { color: var(--success); }
+.leaderboard-row b.loss { color: var(--danger); }
+.leaderboard-row b.accent { color: var(--accent-2); }
 .leaderboard-rank {
   display: grid;
   place-items: center;

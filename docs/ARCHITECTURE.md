@@ -53,7 +53,7 @@
 8. Пользователь выбирает исходы; frontend отправляет `/api/bets` с amount и selections.
 9. `lib/bets.py` валидирует odds, списывает demo-баланс, создаёт `bets`, `bet_selections`, `wallet_transactions`.
 10. Админ запускает scores/manual settlement; `lib/settlement.py` обновляет events, bet selections, bets и wallet. Для хоккея ручной расчёт может сохранить `result_note=ot|so`.
-11. `/api/league` считает прогресс игрока по чистой прибыли из таблицы `bets`, синхронизирует `users.client_status` с текущим рангом и отдаёт шкалу наград/колёса/рейтинг.
+11. `/api/league` считает прогресс игрока по чистой прибыли из таблицы `bets`, синхронизирует `users.client_status` с текущим рангом и отдаёт шкалу наград, колёса, общий рейтинг, рейтинг крупнейших проигрышей и рейтинг крупнейших выигрышей.
 12. Аватары рангов берутся напрямую из Supabase Storage bucket по фиксированным URL `.../ranks/rank_1.png` ... `rank_9.png`; отдельная таблица алиасов рангов больше не нужна.
 13. При получении награды backend пишет `user_league_rewards`, начисляет звёзды через `wallet_transactions.type='league_reward'` и/или создаёт `fortune_wheel_spins.status='available'`.
 14. При ежедневной награде backend пишет `daily_login_rewards` по московской дате, проверяет последовательность дней и начисляет `wallet_transactions.type='daily_login_reward'`.
