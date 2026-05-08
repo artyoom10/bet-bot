@@ -173,3 +173,17 @@
 - Поле суммы в купоне снова выровнено влево и уменьшено.
 - Success-анимация ставки стала спокойнее: зелёный приглушён, галочка анимируется мягче, confetti длится дольше и окно закрывается примерно вместе с окончанием confetti.
 - Cache-busting query обновлён до `20260507-cascade-ticket-markets`.
+
+## Обновление 2026-05-08: лига, награды и удаление
+
+- Добавлен backend-модуль `lib/league.py`: считает общий выигрыш игрока по `wallet_transactions.type='bet_win'`, определяет звание, отдаёт прогресс лиги, награды, доступные колёса и рейтинг.
+- Добавлены endpoints `GET /api/league`, `POST /api/league/rewards/<threshold>/claim`, `POST /api/league/wheel-spins/<spin_id>/spin`.
+- `users.client_status` теперь используется как игровое звание (`Новичок`, `Игрок`, `Аналитик`, `Рисковый`, `Профи`, `Акула`, `Магнат`, `Легенда`, `Босс`), а не как вручную редактируемый админский статус.
+- В админке пользователей поле статуса стало read-only званием; ручное редактирование статуса отключено.
+- Удаление пользователя теперь перед физическим delete явно чистит его ставки, selections, wallet transactions, кошелёк и новые league/wheel таблицы; если БД всё равно блокирует FK, остаётся fallback tombstone.
+- Удаление ставки теперь отвязывает `wallet_transactions.related_bet_id`, удаляет `bet_selections`, затем удаляет `bets`. Pending-ставка перед удалением возвращает сумму.
+- Удаление ручного события со связанными ставками теперь после refund settlement отвязывает `bet_selections.event_id` и физически удаляет событие, чтобы ручные соревнования можно было удалить полностью.
+- Добавлена миграция `supabase/migrations/20260508_league_and_delete_cleanup.sql`: таблицы `user_league_rewards`, `fortune_wheel_spins`, default `users.client_status='Новичок'`, FK `wallet_transactions.related_bet_id -> bets(id) on delete set null`, повторное закрепление cascade/set-null FK для удаления событий.
+- Frontend получил новую нижнюю вкладку `Лига` с прогрессом, вертикальной шкалой наград, кнопками получения награды, доступными колёсами и рейтингом.
+- Профиль стал игровой карточкой: баланс, звание/лига, общий выигрыш, прогресс до следующего звания, крупнейший выигрыш/проигрыш, количество прокруток и место в рейтинге.
+- Проверки текущей правки: `node --check .\static\app.js`, `.\.venv\Scripts\python.exe -m py_compile .\app.py .\lib\league.py .\lib\admin_users.py .\lib\bets.py .\lib\users.py`.

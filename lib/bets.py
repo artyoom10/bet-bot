@@ -267,6 +267,8 @@ def delete_admin_bet(db: SupabaseRestClient, admin_user: dict[str, Any], bet_id:
         credit_wallet(db, bet, float(bet["amount"]), "bet_refund")
         refunded = True
 
+    db.update("wallet_transactions", {"related_bet_id": None}, {"related_bet_id": f"eq.{bet_id}"}, return_rows=False)
+    db.delete("bet_selections", {"bet_id": f"eq.{bet_id}"})
     deleted = db.delete("bets", {"id": f"eq.{bet_id}"})
     return {"deleted": True, "refunded": refunded, "bet": first(deleted) or bet}
 

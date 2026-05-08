@@ -15,6 +15,7 @@ from lib.bets import delete_admin_bet, get_user_bets, manual_settle_admin_bet, p
 from lib.config import SPORT_KEYS, admin_tg_ids, app_name
 from lib.errors import AppError, error_response
 from lib.events import default_sports, get_events_for_app, get_sports_for_app
+from lib.league import claim_league_reward, get_league_payload, spin_fortune_wheel
 from lib.odds_sync import refresh_odds_usage, run_odds_sync, sync_event_markets
 from lib.settlement import get_settlement_runs, manual_result_and_settle, settle_pending_bets, sync_scores_and_settle
 from lib.supabase_client import get_db
@@ -145,6 +146,29 @@ def api_bets():
     db = get_db()
     user = current_user(db)
     return jsonify(get_user_bets(db, user))
+
+
+@app.get("/api/league")
+def api_league():
+    db = get_db()
+    user = current_user(db)
+    return jsonify({"ok": True, **get_league_payload(db, user)})
+
+
+@app.post("/api/league/rewards/<int:threshold>/claim")
+def api_claim_league_reward(threshold: int):
+    db = get_db()
+    user = current_user(db)
+    ensure_active_user(user)
+    return jsonify({"ok": True, **claim_league_reward(db, user, threshold)})
+
+
+@app.post("/api/league/wheel-spins/<spin_id>/spin")
+def api_spin_wheel(spin_id: str):
+    db = get_db()
+    user = current_user(db)
+    ensure_active_user(user)
+    return jsonify({"ok": True, **spin_fortune_wheel(db, user, spin_id)})
 
 
 @app.post("/api/bets")
@@ -958,7 +982,10 @@ def delete_manual_event(db, admin_user: dict[str, Any], event_id: str) -> dict[s
             return_rows=False,
         )
         settled = settle_pending_bets(db, [event_id])
-        return {"deleted": False, "cancelled": True, "event": event, "bets_settled": settled}
+        db.update("bet_selections", {"event_id": None}, {"event_id": f"eq.{event_id}"}, return_rows=False)
+        db.delete("odds_current", {"event_id": f"eq.{event_id}"})
+        deleted = db.delete("events", {"id": f"eq.{event_id}", "source": "eq.manual"})
+        return {"deleted": True, "cancelled": True, "event": first(deleted) or event, "bets_settled": settled}
 
     db.delete("odds_current", {"event_id": f"eq.{event_id}", "bookmaker_key": "eq.manual"})
     deleted = db.delete("events", {"id": f"eq.{event_id}", "source": "eq.manual"})

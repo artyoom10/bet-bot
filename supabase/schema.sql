@@ -7,7 +7,7 @@ create table if not exists users (
   first_name text,
   last_name text,
   language_code text,
-  client_status text not null default 'new',
+  client_status text not null default 'Новичок',
   is_blocked boolean not null default false,
   block_reason text,
   is_admin boolean not null default false,
@@ -172,6 +172,39 @@ create table if not exists bet_selections (
   created_at timestamptz not null default now()
 );
 
+do $$
+begin
+  alter table wallet_transactions drop constraint if exists wallet_transactions_related_bet_id_fkey;
+  alter table wallet_transactions
+    add constraint wallet_transactions_related_bet_id_fkey
+    foreign key (related_bet_id) references bets(id) on delete set null;
+exception
+  when duplicate_object then null;
+end $$;
+
+create table if not exists user_league_rewards (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  threshold integer not null,
+  title text not null,
+  stars_amount numeric(18, 2) not null default 0,
+  wheel_type text,
+  claimed_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  unique(user_id, threshold)
+);
+
+create table if not exists fortune_wheel_spins (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  wheel_type text not null,
+  source_threshold integer,
+  status text not null default 'available',
+  prize_amount numeric(18, 2),
+  created_at timestamptz not null default now(),
+  spun_at timestamptz
+);
+
 create table if not exists telegram_updates (
   update_id bigint primary key,
   payload jsonb not null,
@@ -250,6 +283,9 @@ create index if not exists idx_odds_snapshots_event_captured on odds_snapshots(e
 create index if not exists idx_bets_user_created on bets(user_id, created_at desc);
 create index if not exists idx_bets_status on bets(status);
 create index if not exists idx_bet_selections_bet_id on bet_selections(bet_id);
+create index if not exists idx_wallet_transactions_related_bet on wallet_transactions(related_bet_id);
+create index if not exists idx_user_league_rewards_user on user_league_rewards(user_id, threshold);
+create index if not exists idx_fortune_wheel_spins_user on fortune_wheel_spins(user_id, status, created_at desc);
 create index if not exists idx_sync_runs_started_at on sync_runs(started_at desc);
 create index if not exists idx_odds_api_usage_created_at on odds_api_usage(created_at desc);
 create index if not exists idx_admin_logs_created_at on admin_logs(created_at desc);

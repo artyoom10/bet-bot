@@ -13,6 +13,7 @@ const state = {
   users: [],
   adminBets: [],
   adminSelectedUserId: '',
+  league: null,
   aliases: null,
   teamAliasRows: [],
   manualData: { sports: [], teams: [], events: [] },
@@ -33,7 +34,19 @@ const state = {
 const labels = { home_win: 'П1', draw: 'X', away_win: 'П2', home_or_draw: '1X', home_or_away: '12', draw_or_away: 'X2' };
 const statusLabels = { pending: 'ожидает', won: 'выигрыш', lost: 'проигрыш', refund: 'возврат', cancelled: 'отменена' };
 const eventStatusLabels = { upcoming: 'ожидает', finished: 'завершён', cancelled: 'отменён' };
-const clientStatusLabels = { new: 'новый', active: 'активный', vip: 'VIP', test: 'тестовый', restricted: 'ограничен', suspended: 'приостановлен' };
+const clientStatusLabels = {
+  'Новичок': 'Новичок',
+  'Игрок': 'Игрок',
+  'Аналитик': 'Аналитик',
+  'Рисковый': 'Рисковый',
+  'Профи': 'Профи',
+  'Акула': 'Акула',
+  'Магнат': 'Магнат',
+  'Легенда': 'Легенда',
+  'Босс': 'Босс',
+  new: 'Новичок',
+  active: 'Новичок',
+};
 const sportTypeLabels = { soccer: 'Футбол', hockey: 'Хоккей', esports: 'Киберспорт' };
 const marketTitles = {
   h2h: 'Исход матча',
@@ -978,10 +991,26 @@ function renderProfileView() {
   const user = state.me?.user;
   const wallet = state.me?.wallet;
   if (!user || !wallet) return;
+  const league = state.league?.current || {};
+  const nextTitle = league.next_title ? `До звания ${league.next_title}` : 'Максимальное звание';
+  const progress = Math.max(0, Math.min(100, Number(league.progress_percent || 0)));
   const content = `
+    <div class="profile-rank-card">
+      <span>${escapeHtml(league.title || clientStatusLabels[user.client_status] || user.client_status || 'Новичок')}</span>
+      <strong>${moneyHtml(league.total_win || 0)}</strong>
+      <small>общий выигрыш</small>
+      <div class="profile-progress"><i style="width:${progress}%"></i></div>
+      <em>${escapeHtml(nextTitle)}: ${moneyHtml(league.remaining || 0)}</em>
+    </div>
+    <div class="profile-stats-grid">
+      <div class="profile-stat"><span>Баланс</span><strong>${moneyHtml(wallet.balance)}</strong></div>
+      <div class="profile-stat"><span>Лига</span><strong>${escapeHtml(league.league || league.title || 'Новичок')}</strong></div>
+      <div class="profile-stat"><span>Крупнейший выигрыш</span><strong>${moneyHtml(league.biggest_win || 0)}</strong></div>
+      <div class="profile-stat"><span>Крупнейший проигрыш</span><strong>${moneyHtml(league.biggest_loss || 0)}</strong></div>
+      <div class="profile-stat"><span>Колесо</span><strong>${Number(league.wheel_spins_count || 0)}</strong></div>
+      <div class="profile-stat"><span>Место</span><strong>${league.rank ? `#${league.rank}` : 'пока нет'}</strong></div>
+    </div>
     <div class="stat"><span>Username</span><strong>${escapeHtml(user.username || 'не указан')}</strong></div>
-    <div class="stat"><span>Статус</span><strong>${escapeHtml(clientStatusLabels[user.client_status] || user.client_status || 'не указан')}</strong></div>
-    <div class="stat"><span>Баланс</span><strong>${moneyHtml(wallet.balance)}</strong></div>
   `;
   document.querySelector('#profile-view-name').textContent = resolveProfileName(state.me);
   document.querySelector('#profile-view-balance').innerHTML = moneyHtml(wallet.balance);
@@ -989,6 +1018,112 @@ function renderProfileView() {
   document.querySelector('#profile-card-name').textContent = resolveProfileName(state.me);
   document.querySelector('#profile-card-balance').innerHTML = moneyHtml(wallet.balance);
   document.querySelector('#profile-card-info').innerHTML = content;
+}
+
+async function loadLeague({ silent = false } = {}) {
+  if (!silent) {
+    const root = document.querySelector('#league');
+    if (root && !state.league) root.innerHTML = '<article class="empty-state">Загружаю лигу...</article>';
+  }
+  state.league = await apiFetch('/api/league');
+  renderLeague();
+  renderProfileView();
+}
+
+function renderLeague() {
+  const root = document.querySelector('#league');
+  if (!root || !state.league) return;
+  const current = state.league.current || {};
+  const rewards = state.league.rewards || [];
+  const pendingWheels = state.league.pending_wheels || [];
+  const leaderboard = state.league.leaderboard || [];
+  root.innerHTML = `
+    <article class="league-hero-card">
+      <p class="label">Лига</p>
+      <div class="league-hero-title">
+        <h2>${escapeHtml(current.title || 'Новичок')}</h2>
+        <strong>${moneyHtml(current.total_win || 0)}</strong>
+      </div>
+      <div class="profile-progress league-progress"><i style="width:${Number(current.progress_percent || 0)}%"></i></div>
+      <p>${current.next_title ? `До звания ${escapeHtml(current.next_title)} осталось ${moneyHtml(current.remaining || 0)}` : 'Вы достигли максимального звания'}</p>
+    </article>
+    ${pendingWheels.length ? `
+      <article class="panel wheel-panel">
+        <h2>Колесо фортуны</h2>
+        <div class="wheel-list">
+          ${pendingWheels.map((spin) => `
+            <button class="wheel-button" data-spin-wheel="${escapeAttr(spin.id)}" type="button">
+              <span>${escapeHtml(spin.wheel_title || 'Колесо')}</span>
+              <strong>Крутить</strong>
+            </button>
+          `).join('')}
+        </div>
+      </article>
+    ` : ''}
+    <article class="panel">
+      <h2>Шкала прогресса</h2>
+      <div class="league-timeline">
+        ${rewards.map(renderLeagueReward).join('')}
+      </div>
+    </article>
+    <article class="panel">
+      <h2>Высокие лиги</h2>
+      <div class="leaderboard-list">
+        ${leaderboard.length ? leaderboard.map((row) => `
+          <div class="leaderboard-row">
+            <span>#${row.rank}</span>
+            <strong>${escapeHtml(row.name)}</strong>
+            <em>${escapeHtml(row.title)}</em>
+            <b>${moneyHtml(row.total_win)}</b>
+          </div>
+        `).join('') : '<div class="empty-state">Игроков в высоких лигах пока нет.</div>'}
+      </div>
+    </article>
+  `;
+  root.querySelectorAll('[data-claim-reward]').forEach((button) => button.addEventListener('click', () => claimReward(Number(button.dataset.claimReward))));
+  root.querySelectorAll('[data-spin-wheel]').forEach((button) => button.addEventListener('click', () => spinWheel(button.dataset.spinWheel)));
+}
+
+function renderLeagueReward(reward) {
+  const parts = [];
+  if (reward.stars) parts.push(`${moneyHtml(reward.stars)} награда`);
+  if (reward.wheel_title) parts.push(escapeHtml(reward.wheel_title));
+  if (reward.title) parts.push(`звание ${escapeHtml(reward.title)}`);
+  return `
+    <div class="league-step ${reward.claimed ? 'claimed' : ''} ${reward.claimable ? 'claimable' : ''}">
+      <div class="league-step-dot"></div>
+      <div>
+        <strong>${moneyHtml(reward.threshold)}</strong>
+        <span>${parts.join(' · ')}</span>
+      </div>
+      ${reward.claimable ? `<button class="primary" data-claim-reward="${reward.threshold}" type="button">Получить</button>` : `<em>${reward.claimed ? 'Получено' : 'Закрыто'}</em>`}
+    </div>
+  `;
+}
+
+async function claimReward(threshold) {
+  showLoading('Лига', 'Выдаю награду...');
+  try {
+    state.league = await apiFetch(`/api/league/rewards/${threshold}/claim`, { method: 'POST', body: JSON.stringify({}) });
+    await reloadMeSilently().catch(() => {});
+    renderLeague();
+    notify('Награда получена', 'success');
+  } finally {
+    hideLoading();
+  }
+}
+
+async function spinWheel(spinId) {
+  showLoading('Колесо фортуны', 'Запускаю колесо...');
+  try {
+    const result = await apiFetch(`/api/league/wheel-spins/${spinId}/spin`, { method: 'POST', body: JSON.stringify({}) });
+    state.league = result.league;
+    await reloadMeSilently().catch(() => {});
+    renderLeague();
+    notify(`Выпало ${money(result.prize)}`, 'success');
+  } finally {
+    hideLoading();
+  }
 }
 
 function closeProfileCard() {
@@ -1201,7 +1336,7 @@ function renderUsers() {
         <label>Username <input data-user-username="${user.id}" value="${escapeAttr(user.username || '')}" autocomplete="off"></label>
         <label>Имя <input data-user-first="${user.id}" value="${escapeAttr(user.first_name || '')}" autocomplete="off"></label>
         <label>Фамилия <input data-user-last="${user.id}" value="${escapeAttr(user.last_name || '')}" autocomplete="off"></label>
-        <label>Статус <select data-user-status="${user.id}">${Object.entries(clientStatusLabels).map(([value, label]) => `<option value="${value}" ${value === user.client_status ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+        <div class="readonly-field"><span>Звание</span><strong>${escapeHtml(clientStatusLabels[user.client_status] || user.client_status || 'Новичок')}</strong></div>
         <label>Баланс <input data-user-balance="${user.id}" type="number" min="0" step="10" value="${Number(wallet?.balance || 0)}"></label>
         <label class="checkbox-row"><input data-user-blocked="${user.id}" type="checkbox" ${user.is_blocked ? 'checked' : ''}> Заблокирован</label>
         <button class="primary" data-save-user="${user.id}">Сохранить</button>
@@ -1223,7 +1358,6 @@ async function saveUser(userId) {
         username: document.querySelector(`[data-user-username="${userId}"]`).value,
         first_name: document.querySelector(`[data-user-first="${userId}"]`).value,
         last_name: document.querySelector(`[data-user-last="${userId}"]`).value,
-        client_status: document.querySelector(`[data-user-status="${userId}"]`).value,
         balance: Number(document.querySelector(`[data-user-balance="${userId}"]`).value),
         is_blocked: document.querySelector(`[data-user-blocked="${userId}"]`).checked,
       }),
@@ -2124,7 +2258,11 @@ function switchTab(tab) {
   document.querySelectorAll('.view').forEach((view) => view.classList.remove('active'));
   document.querySelector(`#view-${tab}`).classList.add('active');
   if (tab === 'bets' || tab === 'history') loadBets().catch((error) => status(error.message));
-  if (tab === 'profile') renderProfileView();
+  if (tab === 'league') loadLeague().catch((error) => status(error.message));
+  if (tab === 'profile') {
+    renderProfileView();
+    loadLeague({ silent: true }).catch(() => {});
+  }
 }
 
 function openCreateUserModal() {

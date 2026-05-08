@@ -10,9 +10,6 @@ from lib.supabase_client import SupabaseRestClient
 from lib.users import first
 
 
-CLIENT_STATUSES = {"new", "active", "vip", "test", "restricted", "suspended"}
-
-
 def list_admin_users(db: SupabaseRestClient) -> list[dict[str, Any]]:
     users = db.select(
         "users",
@@ -60,7 +57,7 @@ def create_admin_user(db: SupabaseRestClient, admin_user: dict[str, Any], payloa
                 "username": username or None,
                 "first_name": first_name,
                 "last_name": last_name,
-                "client_status": "active",
+                "client_status": "Новичок",
                 "is_admin": False,
             },
         )
@@ -108,12 +105,6 @@ def update_admin_user(
         if field in {"tg_id", "first_name"} and not value:
             raise AppError(f"invalid_{field}", "Telegram ID и имя не могут быть пустыми", 400)
         user_patch[field] = value or None
-
-    if "client_status" in payload:
-        status = clean_text(payload.get("client_status"))
-        if status not in CLIENT_STATUSES:
-            raise AppError("invalid_status", "Некорректный статус пользователя", 400)
-        user_patch["client_status"] = status
 
     if "is_blocked" in payload:
         user_patch["is_blocked"] = bool(payload.get("is_blocked"))
@@ -173,6 +164,7 @@ def delete_admin_user(db: SupabaseRestClient, admin_user: dict[str, Any], user_i
         raise AppError("delete_self_forbidden", "Нельзя удалить собственный админ-профиль", 400)
 
     try:
+        cleanup_user_dependencies(db, user_id)
         deleted = db.delete("users", {"id": f"eq.{user_id}"})
         log_admin_action(db, admin_user, "delete_user", "user", user_id, {"tg_id": user.get("tg_id")})
         return {"deleted": True, "user": first(deleted) or user}
@@ -186,7 +178,7 @@ def delete_admin_user(db: SupabaseRestClient, admin_user: dict[str, Any], user_i
         "username": None,
         "first_name": "Удаленный",
         "last_name": None,
-        "client_status": "suspended",
+        "client_status": "Новичок",
         "is_blocked": True,
         "block_reason": "deleted_by_admin",
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -201,6 +193,29 @@ def delete_admin_user(db: SupabaseRestClient, admin_user: dict[str, Any], user_i
         {"tg_id": user.get("tg_id"), "reason": "foreign_key_reference"},
     )
     return {"deleted": True, "archived": True, "user": archived}
+
+
+def cleanup_user_dependencies(db: SupabaseRestClient, user_id: str) -> None:
+    bets = db.select("bets", {"select": "id", "user_id": f"eq.{user_id}", "limit": "1000"})
+    bet_ids = [bet["id"] for bet in bets if bet.get("id")]
+    if bet_ids:
+        bet_filter = f"in.({','.join(bet_ids)})"
+        db.update("wallet_transactions", {"related_bet_id": None}, {"related_bet_id": bet_filter}, return_rows=False)
+        db.delete("bet_selections", {"bet_id": bet_filter})
+        db.delete("bets", {"id": bet_filter})
+
+    optional_delete(db, "fortune_wheel_spins", {"user_id": f"eq.{user_id}"})
+    optional_delete(db, "user_league_rewards", {"user_id": f"eq.{user_id}"})
+    db.delete("wallet_transactions", {"user_id": f"eq.{user_id}"})
+    db.delete("wallets", {"user_id": f"eq.{user_id}"})
+
+
+def optional_delete(db: SupabaseRestClient, table: str, params: dict[str, str]) -> None:
+    try:
+        db.delete(table, params)
+    except AppError as exc:
+        if exc.error != "supabase_error":
+            raise
 
 
 def clean_text(value: Any) -> str:
