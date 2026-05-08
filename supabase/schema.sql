@@ -205,13 +205,6 @@ create table if not exists fortune_wheel_spins (
   spun_at timestamptz
 );
 
-create table if not exists league_rank_aliases (
-  title text primary key,
-  display_name text,
-  logo_url text,
-  updated_at timestamptz not null default now()
-);
-
 create table if not exists daily_login_rewards (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
@@ -221,19 +214,6 @@ create table if not exists daily_login_rewards (
   created_at timestamptz not null default now(),
   unique(user_id, reward_date)
 );
-
-insert into league_rank_aliases(title, display_name)
-values
-  ('Железо', 'Железо'),
-  ('Бронза', 'Бронза'),
-  ('Серебро', 'Серебро'),
-  ('Золото', 'Золото'),
-  ('Платина', 'Платина'),
-  ('Изумруд', 'Изумруд'),
-  ('Сапфир', 'Сапфир'),
-  ('Рубин', 'Рубин'),
-  ('Алмаз', 'Алмаз')
-on conflict (title) do nothing;
 
 create table if not exists telegram_updates (
   update_id bigint primary key,

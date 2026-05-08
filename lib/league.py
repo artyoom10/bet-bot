@@ -10,17 +10,18 @@ from lib.users import first
 
 
 MOSCOW_TZ = timezone(timedelta(hours=3))
+RANK_LOGO_BASE_URL = "https://mzyxhpnkvdloulcxidpn.supabase.co/storage/v1/object/public/ranks"
 
 LEAGUE_TIERS = [
-    {"threshold": 0, "title": "Железо"},
-    {"threshold": 2500, "title": "Бронза"},
-    {"threshold": 7500, "title": "Серебро"},
-    {"threshold": 15000, "title": "Золото"},
-    {"threshold": 30000, "title": "Платина"},
-    {"threshold": 50000, "title": "Изумруд"},
-    {"threshold": 80000, "title": "Сапфир"},
-    {"threshold": 125000, "title": "Рубин"},
-    {"threshold": 200000, "title": "Алмаз"},
+    {"threshold": 0, "title": "Железо", "logo_url": f"{RANK_LOGO_BASE_URL}/rank_1.png"},
+    {"threshold": 2500, "title": "Бронза", "logo_url": f"{RANK_LOGO_BASE_URL}/rank_2.png"},
+    {"threshold": 7500, "title": "Серебро", "logo_url": f"{RANK_LOGO_BASE_URL}/rank_3.png"},
+    {"threshold": 15000, "title": "Золото", "logo_url": f"{RANK_LOGO_BASE_URL}/rank_4.png"},
+    {"threshold": 30000, "title": "Платина", "logo_url": f"{RANK_LOGO_BASE_URL}/rank_5.png"},
+    {"threshold": 50000, "title": "Изумруд", "logo_url": f"{RANK_LOGO_BASE_URL}/rank_6.png"},
+    {"threshold": 80000, "title": "Сапфир", "logo_url": f"{RANK_LOGO_BASE_URL}/rank_7.png"},
+    {"threshold": 125000, "title": "Рубин", "logo_url": f"{RANK_LOGO_BASE_URL}/rank_8.png"},
+    {"threshold": 200000, "title": "Алмаз", "logo_url": f"{RANK_LOGO_BASE_URL}/rank_9.png"},
 ]
 
 BONUS_REWARD_STEPS = [
@@ -82,12 +83,9 @@ WHEELS = {
 
 
 def get_league_payload(db: SupabaseRestClient, user: dict[str, Any]) -> dict[str, Any]:
-    rank_aliases = get_rank_aliases(db)
     stats = calculate_user_stats(db, user["id"])
-    tier = with_alias(tier_for_total(stats["total_profit"]), rank_aliases)
+    tier = tier_for_total(stats["total_profit"])
     next_tier = next_tier_for_total(stats["total_profit"])
-    if next_tier:
-        next_tier = with_alias(next_tier, rank_aliases)
     sync_user_title(db, user, tier["title"])
 
     claimed_rows = db.select(
@@ -105,7 +103,9 @@ def get_league_payload(db: SupabaseRestClient, user: dict[str, Any]) -> dict[str
             "limit": "20",
         },
     )
-    leaderboard = build_leaderboard(db, rank_aliases)
+    if user.get("is_admin"):
+        pending_spins = [admin_wheel_spin(wheel_type) for wheel_type in WHEELS] + pending_spins
+    leaderboard = build_leaderboard(db)
 
     return {
         "current": {
@@ -120,8 +120,8 @@ def get_league_payload(db: SupabaseRestClient, user: dict[str, Any]) -> dict[str
             "progress_percent": progress_percent(stats["total_profit"], tier, next_tier),
             "rank": leaderboard_rank(leaderboard, user["id"], stats["total_profit"]),
         },
-        "tiers": tiers_payload(rank_aliases),
-        "rewards": rewards_payload(stats["total_profit"], claimed_by_threshold, rank_aliases),
+        "tiers": tiers_payload(),
+        "rewards": rewards_payload(stats["total_profit"], claimed_by_threshold),
         "daily_reward": daily_reward_payload(db, user["id"]),
         "wheels": public_wheels(),
         "pending_wheels": [spin_payload(spin) for spin in pending_spins],
@@ -196,6 +196,14 @@ def claim_daily_reward(db: SupabaseRestClient, user: dict[str, Any]) -> dict[str
 
 
 def spin_fortune_wheel(db: SupabaseRestClient, user: dict[str, Any], spin_id: str) -> dict[str, Any]:
+    if spin_id.startswith("admin:") and user.get("is_admin"):
+        wheel_type = spin_id.split(":", 1)[1]
+        if wheel_type not in WHEELS:
+            raise AppError("wheel_type_not_supported", "Тип колеса не поддерживается", 400)
+        prize = weighted_prize(wheel_type)
+        credit_wallet(db, user["id"], float(prize), "wheel_prize", {"spin_id": spin_id, "wheel_type": wheel_type, "admin_unlimited": True})
+        return {"prize": prize, "spin": spin_payload(admin_wheel_spin(wheel_type) | {"status": "spun", "prize_amount": prize}), "league": get_league_payload(db, user)}
+
     spin = first(
         db.select(
             "fortune_wheel_spins",
@@ -269,7 +277,7 @@ def calculate_user_stats(db: SupabaseRestClient, user_id: str) -> dict[str, Any]
     }
 
 
-def build_leaderboard(db: SupabaseRestClient, rank_aliases: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def build_leaderboard(db: SupabaseRestClient) -> list[dict[str, Any]]:
     users = db.select(
         "users",
         {
@@ -301,7 +309,7 @@ def build_leaderboard(db: SupabaseRestClient, rank_aliases: dict[str, dict[str, 
     rows = []
     for profile in users:
         total = round(totals.get(profile["id"], 0.0), 2)
-        tier = with_alias(tier_for_total(total), rank_aliases)
+        tier = tier_for_total(total)
         rows.append(
             {
                 "user_id": profile["id"],
@@ -351,16 +359,6 @@ def daily_reward_payload(db: SupabaseRestClient, user_id: str) -> dict[str, Any]
         "rewards": [{"day": index + 1, "stars": amount} for index, amount in enumerate(DAILY_REWARDS)],
         "last_claimed_at": last.get("created_at") if last else None,
     }
-
-
-def get_rank_aliases(db: SupabaseRestClient) -> dict[str, dict[str, Any]]:
-    try:
-        rows = db.select("league_rank_aliases", {"select": "*", "limit": "100"})
-    except AppError as exc:
-        if exc.error != "supabase_error":
-            raise
-        return {}
-    return {row["title"]: row for row in rows}
 
 
 def tier_for_total(total_profit: float) -> dict[str, Any]:
@@ -420,21 +418,20 @@ def progress_percent(total_profit: float, tier: dict[str, Any], next_tier: dict[
     return round(min(100, max(0, (total_profit - tier["threshold"]) / span * 100)), 1)
 
 
-def rewards_payload(total_profit: float, claimed_by_threshold: dict[int, dict[str, Any]], rank_aliases: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def rewards_payload(total_profit: float, claimed_by_threshold: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for tier in LEAGUE_TIERS[1:]:
-        rank = with_alias(tier, rank_aliases)
         rows.append(
             {
-                "threshold": rank["threshold"],
+                "threshold": tier["threshold"],
                 "kind": "rank",
-                "title": rank["title"],
+                "title": tier["title"],
                 "stars": 0,
                 "wheel_type": None,
                 "wheel_title": None,
-                "logo_url": rank.get("logo_url"),
-                "claimed": total_profit >= rank["threshold"],
-                "eligible": total_profit >= rank["threshold"],
+                "logo_url": tier.get("logo_url"),
+                "claimed": total_profit >= tier["threshold"],
+                "eligible": total_profit >= tier["threshold"],
                 "claimable": False,
             }
         )
@@ -455,10 +452,10 @@ def rewards_payload(total_profit: float, claimed_by_threshold: dict[int, dict[st
     return rows
 
 
-def tiers_payload(rank_aliases: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def tiers_payload() -> list[dict[str, Any]]:
     return [
         {
-            **with_alias(tier, rank_aliases),
+            **tier,
             "next_threshold": LEAGUE_TIERS[index + 1]["threshold"] if index + 1 < len(LEAGUE_TIERS) else None,
         }
         for index, tier in enumerate(LEAGUE_TIERS)
@@ -490,6 +487,7 @@ def spin_payload(spin: dict[str, Any]) -> dict[str, Any]:
         "prize_amount": spin.get("prize_amount"),
         "created_at": spin.get("created_at"),
         "spun_at": spin.get("spun_at"),
+        "unlimited": bool(spin.get("unlimited")),
     }
 
 
@@ -502,13 +500,14 @@ def leaderboard_rank(leaderboard: list[dict[str, Any]], user_id: str, total_prof
     return 1 + sum(1 for row in leaderboard if row["total_profit"] > total_profit)
 
 
-def with_alias(tier: dict[str, Any], aliases: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    alias = aliases.get(tier["title"]) or {}
+def admin_wheel_spin(wheel_type: str) -> dict[str, Any]:
     return {
-        **tier,
-        "title": alias.get("display_name") or tier["title"],
-        "base_title": tier["title"],
-        "logo_url": alias.get("logo_url"),
+        "id": f"admin:{wheel_type}",
+        "wheel_type": wheel_type,
+        "source_threshold": None,
+        "status": "available",
+        "created_at": None,
+        "unlimited": True,
     }
 
 

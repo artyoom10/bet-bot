@@ -34,26 +34,6 @@ create table if not exists fortune_wheel_spins (
 create index if not exists idx_user_league_rewards_user on user_league_rewards(user_id, threshold);
 create index if not exists idx_fortune_wheel_spins_user on fortune_wheel_spins(user_id, status, created_at desc);
 
-create table if not exists league_rank_aliases (
-  title text primary key,
-  display_name text,
-  logo_url text,
-  updated_at timestamptz not null default now()
-);
-
-insert into league_rank_aliases(title, display_name)
-values
-  ('Железо', 'Железо'),
-  ('Бронза', 'Бронза'),
-  ('Серебро', 'Серебро'),
-  ('Золото', 'Золото'),
-  ('Платина', 'Платина'),
-  ('Изумруд', 'Изумруд'),
-  ('Сапфир', 'Сапфир'),
-  ('Рубин', 'Рубин'),
-  ('Алмаз', 'Алмаз')
-on conflict (title) do nothing;
-
 create table if not exists daily_login_rewards (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,

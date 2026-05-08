@@ -1077,7 +1077,7 @@ function renderLeague() {
       <h2>Ежедневная награда</h2>
       <p>Забирайте награду каждый день подряд. Если пропустить день, серия начнётся заново.</p>
       <div class="daily-track">
-        ${(daily.rewards || []).map((item) => `<span class="${item.day === daily.next_day ? 'active' : ''}"><small>День ${item.day}</small><strong>${money(item.stars)}</strong></span>`).join('')}
+        ${renderDailyTrack(daily)}
       </div>
       <button class="primary" id="claim-daily-reward" type="button" ${daily.available ? '' : 'disabled'}>${daily.available ? `Получить ${money(daily.amount)}` : 'Сегодня получено'}</button>
     </article>
@@ -1085,12 +1085,7 @@ function renderLeague() {
       <article class="panel wheel-panel">
         <h2>Колесо фортуны</h2>
         <div class="wheel-list">
-          ${pendingWheels.map((spin) => `
-            <button class="wheel-button" data-spin-wheel="${escapeAttr(spin.id)}" type="button">
-              <span>${escapeHtml(spin.wheel_title || 'Колесо')}</span>
-              <strong>Крутить</strong>
-            </button>
-          `).join('')}
+          ${renderWheelList(pendingWheels)}
         </div>
       </article>
     ` : ''}
@@ -1098,7 +1093,7 @@ function renderLeague() {
       <h2>Шкала прогресса</h2>
       <p class="league-description">Прогресс считается по чистой прибыли: выплата минус сумма ставки. Например, ставка ${money(1000)} с кэфом 1.50 даёт выплату ${money(1500)}, а в прогресс идёт ${money(500)}.</p>
       <div class="league-timeline">
-        ${rewards.map(renderLeagueReward).join('')}
+        ${renderLeagueTimeline(rewards)}
       </div>
     </article>
   `;
@@ -1108,13 +1103,88 @@ function renderLeague() {
   renderRating();
 }
 
-function renderLeagueReward(reward) {
+function renderDailyTrack(daily) {
+  const nextDay = Number(daily.next_day || 1);
+  const completedUntil = daily.available ? nextDay - 1 : nextDay;
+  return (daily.rewards || []).map((item) => {
+    const stateClass = item.day <= completedUntil ? 'done' : item.day === nextDay ? 'active' : 'locked';
+    const lineClass = item.day > 1 && item.day <= nextDay ? 'line-done' : '';
+    return `
+      <span class="${stateClass} ${lineClass}" style="${dailyGridPosition(item.day)}">
+        <i>${item.day}</i>
+        <small>День ${item.day}</small>
+        <strong>${money(item.stars)}</strong>
+      </span>
+    `;
+  }).join('');
+}
+
+function dailyGridPosition(day) {
+  const positions = {
+    1: 'grid-column:1;grid-row:1;',
+    2: 'grid-column:2;grid-row:1;',
+    3: 'grid-column:3;grid-row:1;',
+    4: 'grid-column:4;grid-row:1;',
+    5: 'grid-column:4;grid-row:2;',
+    6: 'grid-column:3;grid-row:2;',
+    7: 'grid-column:2;grid-row:2;',
+  };
+  return positions[day] || '';
+}
+
+function renderWheelList(spins) {
+  const grouped = Object.values(spins.reduce((groups, spin) => {
+    const key = spin.wheel_type || spin.id;
+    groups[key] = groups[key] || { ...spin, count: 0, ids: [], unlimited: false };
+    groups[key].count += 1;
+    groups[key].ids.push(spin.id);
+    groups[key].unlimited = groups[key].unlimited || Boolean(spin.unlimited);
+    return groups;
+  }, {}));
+  return grouped.map((spin) => {
+    const countText = spin.unlimited ? 'без лимита' : `${spin.count} шт.`;
+    return `
+      <button class="wheel-button" data-spin-wheel="${escapeAttr(spin.ids[0])}" type="button">
+        <span class="wheel-button-icon">${wheelInitial(spin.wheel_type)}</span>
+        <span><strong>${escapeHtml(spin.wheel_title || 'Колесо')}</strong><small>${escapeHtml(countText)}</small></span>
+        <b>Крутить</b>
+      </button>
+    `;
+  }).join('');
+}
+
+function wheelInitial(type = '') {
+  return ({ small: 'М', standard: 'О', large: 'Б', elite: 'Э' }[type] || 'К');
+}
+
+function renderLeagueTimeline(rewards) {
+  const ranks = rewards.filter((reward) => reward.kind === 'rank');
+  const bonuses = rewards.filter((reward) => reward.kind !== 'rank');
+  let previousThreshold = 0;
+  return ranks.map((rank) => {
+    const nested = bonuses.filter((reward) => reward.threshold > previousThreshold && reward.threshold <= rank.threshold);
+    previousThreshold = rank.threshold;
+    const shouldOpen = nested.some((reward) => reward.claimable);
+    return `
+      <details class="league-rank-group" ${shouldOpen ? 'open' : ''}>
+        <summary>${renderLeagueReward(rank, { summary: true })}</summary>
+        <div class="league-substeps">
+          ${nested.length ? nested.map((reward) => renderLeagueReward(reward, { compact: true })).join('') : '<div class="league-empty-substep">Промежуточных наград нет</div>'}
+        </div>
+      </details>
+    `;
+  }).join('');
+}
+
+function renderLeagueReward(reward, options = {}) {
   const parts = [];
   if (reward.kind === 'rank') parts.push(`новый ранг ${escapeHtml(reward.title)}`);
   if (reward.stars) parts.push(`награда ${moneyHtml(reward.stars)}`);
   if (reward.wheel_title) parts.push(escapeHtml(reward.wheel_title));
+  const compactClass = options.compact ? 'compact' : '';
+  const summaryClass = options.summary ? 'summary-step' : '';
   return `
-    <div class="league-step ${reward.claimed ? 'claimed' : ''} ${reward.claimable ? 'claimable' : ''}">
+    <div class="league-step ${compactClass} ${summaryClass} ${reward.claimed ? 'claimed' : ''} ${reward.claimable ? 'claimable' : ''}">
       <div class="league-step-dot">${reward.kind === 'rank' ? rankAvatarHtml(reward, reward.title) : ''}</div>
       <div>
         <strong class="reward-threshold">${money(reward.threshold)}</strong>
@@ -1184,14 +1254,16 @@ async function claimDailyReward() {
 async function spinWheel(spinId) {
   const spin = (state.league?.pending_wheels || []).find((item) => item.id === spinId);
   const wheel = state.league?.wheels?.[spin?.wheel_type] || null;
-  showWheelLoading(wheel, spin);
+  await showWheelLoading(wheel, spin);
   try {
     const result = await apiFetch(`/api/league/wheel-spins/${spinId}/spin`, { method: 'POST', body: JSON.stringify({}) });
-    await delay(1700);
+    const prizeIndex = wheelPrizeIndex(wheel, result.prize);
+    startWheelSpin(prizeIndex, wheel?.segments?.length || 1);
+    await delay(2600);
     state.league = result.league;
     await reloadMeSilently().catch(() => {});
     renderLeague();
-    finishWheelLoading(result.prize);
+    finishWheelLoading(result.prize, prizeIndex, wheel?.segments?.length || 1);
     await delay(3600);
   } finally {
     hideLoading();
@@ -1199,9 +1271,9 @@ async function spinWheel(spinId) {
 }
 
 function showWheelLoading(wheel, spin) {
-  showLoading(spin?.wheel_title || wheel?.title || 'Колесо фортуны', 'Колесо набирает скорость...');
+  showLoading(spin?.wheel_title || wheel?.title || 'Колесо фортуны', 'Посмотрите возможные награды и запустите колесо.');
   const modal = document.querySelector('#loading-modal');
-  modal.classList.add('wheel-mode');
+  modal.classList.add('wheel-mode', 'wheel-ready');
   const card = modal.querySelector('.loading-card');
   const segments = wheel?.segments || [];
   const stage = document.createElement('div');
@@ -1209,18 +1281,42 @@ function showWheelLoading(wheel, spin) {
   stage.innerHTML = `
     <div class="wheel-pointer"></div>
     <div class="fortune-wheel">
-      ${segments.map((segment, index) => `<span style="--i:${index};--n:${Math.max(segments.length, 1)}">${moneyHtml(segment.stars)}</span>`).join('')}
+      ${segments.map((segment, index) => {
+        const segmentSize = 360 / Math.max(segments.length, 1);
+        const angle = Math.round((segmentSize * index) + (segmentSize / 2));
+        return `<span style="--angle:${angle}deg"><b>${money(segment.stars)}</b><small>${segment.chance_percent}%</small></span>`;
+      }).join('')}
     </div>
     <div class="wheel-prize" hidden></div>
+    <button class="primary wheel-start-button" type="button">Крутить</button>
   `;
   card.appendChild(stage);
-  tg?.HapticFeedback?.impactOccurred('light');
-  window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('medium'), 650);
-  window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('light'), 1250);
+  return new Promise((resolve) => {
+    stage.querySelector('.wheel-start-button').addEventListener('click', () => {
+      stage.querySelector('.wheel-start-button').disabled = true;
+      document.querySelector('#loading-text').textContent = 'Колесо набирает скорость...';
+      tg?.HapticFeedback?.impactOccurred('light');
+      window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('medium'), 650);
+      window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('light'), 1250);
+      resolve();
+    }, { once: true });
+  });
+}
+
+function startWheelSpin(prizeIndex, totalSegments) {
+  const modal = document.querySelector('#loading-modal');
+  const wheelNode = modal.querySelector('.fortune-wheel');
+  const segmentSize = 360 / Math.max(totalSegments, 1);
+  const prizeCenterAngle = (prizeIndex * segmentSize) + (segmentSize / 2);
+  const stopRotation = 360 * 5 - prizeCenterAngle;
+  wheelNode?.style.setProperty('--stop-rotation', `${Math.round(stopRotation)}deg`);
+  modal.classList.remove('wheel-ready');
+  modal.classList.add('wheel-spinning');
 }
 
 function finishWheelLoading(prize) {
   const modal = document.querySelector('#loading-modal');
+  modal.classList.remove('wheel-spinning');
   modal.classList.add('wheel-finished');
   document.querySelector('#loading-text').textContent = `Выпало ${money(prize)}`;
   const prizeNode = modal.querySelector('.wheel-prize');
@@ -1230,6 +1326,12 @@ function finishWheelLoading(prize) {
   }
   addSuccessConfetti(140);
   triggerSuccessHaptics();
+}
+
+function wheelPrizeIndex(wheel, prize) {
+  const segments = wheel?.segments || [];
+  const index = segments.findIndex((segment) => Number(segment.stars) === Number(prize));
+  return index >= 0 ? index : 0;
 }
 
 function closeProfileCard() {
