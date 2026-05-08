@@ -1324,24 +1324,25 @@ h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
 .daily-panel p { margin-bottom: 8px; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .daily-track {
   display: grid;
-  grid-template-columns: repeat(7, minmax(64px, 1fr));
-  gap: 7px;
+  grid-template-columns: repeat(7, minmax(48px, 1fr));
+  gap: 5px;
+  max-width: 100%;
   overflow-x: auto;
   padding-bottom: 4px;
 }
 .daily-track span {
   display: grid;
-  gap: 4px;
-  min-width: 64px;
+  gap: 3px;
+  min-width: 48px;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 8px;
+  border-radius: 12px;
+  padding: 7px 5px;
   background: #fff;
   text-align: center;
 }
 .daily-track span.active { border-color: rgba(22, 163, 106, .36); background: #eafff3; }
-.daily-track small { color: var(--muted); font-size: 10px; font-weight: 850; }
-.daily-track strong { color: var(--accent-2); font-size: 12px; font-weight: 950; white-space: nowrap; }
+.daily-track small { color: var(--muted); font-size: 9px; font-weight: 850; white-space: nowrap; }
+.daily-track strong { color: var(--accent-2); font-size: 11px; font-weight: 950; white-space: nowrap; }
 .league-timeline {
   position: relative;
   display: grid;
@@ -1359,7 +1360,7 @@ h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
 .league-step {
   position: relative;
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   border: 1px solid var(--border);
@@ -1370,12 +1371,20 @@ h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
 .league-step.claimed { border-color: rgba(22, 163, 106, .24); background: #effff6; }
 .league-step-dot {
   z-index: 1;
-  width: 26px;
-  height: 26px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
   border: 3px solid #fff;
   border-radius: 50%;
   background: var(--surface-3);
   box-shadow: 0 0 0 1px var(--border);
+}
+.league-step-dot .rank-avatar {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  box-shadow: none;
 }
 .league-step.claimed .league-step-dot { background: var(--success); }
 .league-step.claimable { border-color: rgba(47, 128, 237, .38); box-shadow: 0 10px 24px rgba(47, 128, 237, .12); }

@@ -1033,7 +1033,6 @@ function renderProfileView() {
       <div class="profile-stat"><span>Лига</span><strong>${escapeHtml(league.league || league.title || 'Железо')}</strong></div>
       <div class="profile-stat"><span>Крупнейший выигрыш</span><strong>${moneyHtml(league.biggest_win || 0)}</strong></div>
       <div class="profile-stat"><span>Крупнейший проигрыш</span><strong>${moneyHtml(league.biggest_loss || 0)}</strong></div>
-      <div class="profile-stat"><span>Колесо</span><strong>${Number(league.wheel_spins_count || 0)}</strong></div>
       <div class="profile-stat"><span>Место</span><strong>${league.rank ? `#${league.rank}` : 'пока нет'}</strong></div>
     </div>
   `;
@@ -1062,7 +1061,7 @@ function renderLeague() {
   const rewards = state.league.rewards || [];
   const pendingWheels = state.league.pending_wheels || [];
   const daily = state.league.daily_reward || {};
-  const maxThreshold = Math.max(...(state.league.tiers || []).map((tier) => Number(tier.threshold || 0)), 0);
+  const scaleEnd = current.next_threshold || current.threshold || 0;
   root.innerHTML = `
     <article class="league-hero-card">
       <p class="label">Лига</p>
@@ -1071,14 +1070,14 @@ function renderLeague() {
         <strong>${moneyHtml(current.total_profit || current.total_win || 0)}</strong>
       </div>
       <div class="profile-progress league-progress"><i style="width:${Number(current.progress_percent || 0)}%"></i></div>
-      <div class="league-scale"><span>${moneyHtml(0)}</span><span>${moneyHtml(maxThreshold)}</span></div>
+      <div class="league-scale"><span>${moneyHtml(0)}</span><span>${moneyHtml(scaleEnd)}</span></div>
       <p>${current.next_title ? `До ранга ${escapeHtml(current.next_title)} осталось ${moneyHtml(current.remaining || 0)}` : 'Вы достигли максимального ранга'}</p>
     </article>
     <article class="panel daily-panel ${daily.available ? 'claimable' : 'claimed'}">
       <h2>Ежедневная награда</h2>
       <p>Забирайте награду каждый день подряд. Если пропустить день, серия начнётся заново.</p>
       <div class="daily-track">
-        ${(daily.rewards || []).map((item) => `<span class="${item.day === daily.next_day ? 'active' : ''}"><small>День ${item.day}</small><strong>${moneyHtml(item.stars)}</strong></span>`).join('')}
+        ${(daily.rewards || []).map((item) => `<span class="${item.day === daily.next_day ? 'active' : ''}"><small>День ${item.day}</small><strong>${money(item.stars)}</strong></span>`).join('')}
       </div>
       <button class="primary" id="claim-daily-reward" type="button" ${daily.available ? '' : 'disabled'}>${daily.available ? `Получить ${money(daily.amount)}` : 'Сегодня получено'}</button>
     </article>
@@ -1116,9 +1115,9 @@ function renderLeagueReward(reward) {
   if (reward.wheel_title) parts.push(escapeHtml(reward.wheel_title));
   return `
     <div class="league-step ${reward.claimed ? 'claimed' : ''} ${reward.claimable ? 'claimable' : ''}">
-      <div class="league-step-dot"></div>
+      <div class="league-step-dot">${reward.kind === 'rank' ? rankAvatarHtml(reward, reward.title) : ''}</div>
       <div>
-        <strong class="reward-threshold">${moneyHtml(reward.threshold)}</strong>
+        <strong class="reward-threshold">${money(reward.threshold)}</strong>
         <span>${parts.join(' · ')}</span>
       </div>
       ${reward.claimable ? `<button class="primary" data-claim-reward="${reward.threshold}" type="button">Получить</button>` : `<em>${reward.claimed ? 'Получено' : 'Закрыто'}</em>`}
@@ -1137,7 +1136,7 @@ function renderRating() {
         <h2>Общий рейтинг</h2>
         <strong>${leaderboard.length}</strong>
       </div>
-      <p>Места считаются по чистой прибыли за всё время. Игроки с нулевой прибылью тоже участвуют.</p>
+      <p>Места считаются по чистой прибыли за всё время.</p>
     </article>
     <article class="panel">
       <div class="leaderboard-list">
