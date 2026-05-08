@@ -159,7 +159,7 @@ function unlockBodyScroll(reason) {
 function showLoading(title, text = 'Подождите, операция выполняется.') {
   const modal = document.querySelector('#loading-modal');
   modal.className = 'loading-modal';
-  modal.querySelectorAll('.loading-confetti, .wheel-stage').forEach((item) => item.remove());
+  modal.querySelectorAll('.loading-confetti, .wheel-stage, .wheel-close-button').forEach((item) => item.remove());
   document.querySelector('#loading-title').textContent = title;
   document.querySelector('#loading-text').textContent = text;
   modal.hidden = false;
@@ -205,7 +205,7 @@ function hideLoading() {
   const modal = document.querySelector('#loading-modal');
   modal.hidden = true;
   modal.className = 'loading-modal';
-  modal.querySelectorAll('.loading-confetti, .wheel-stage').forEach((item) => item.remove());
+  modal.querySelectorAll('.loading-confetti, .wheel-stage, .wheel-close-button').forEach((item) => item.remove());
   unlockBodyScroll('loading');
 }
 
@@ -1018,7 +1018,7 @@ function renderProfileView() {
   if (!user || !wallet) return;
   const league = state.league?.current || {};
   const profileName = resolveProfileName(state.me);
-  const nextTitle = league.next_title ? `До ранга ${league.next_title}` : 'Максимальный ранг';
+  const nextTitle = league.next_title ? `До уровня ${league.next_title}` : 'Максимальный уровень';
   const progress = Math.max(0, Math.min(100, Number(league.progress_percent || 0)));
   const content = `
     <div class="profile-rank-card">
@@ -1031,11 +1031,10 @@ function renderProfileView() {
       <div class="profile-progress"><i style="width:${progress}%"></i></div>
       <em>${escapeHtml(nextTitle)}: ${moneyHtml(league.remaining || 0)}</em>
     </div>
-      <div class="profile-stats-grid">
-        <div class="profile-stat"><span>Лига</span><strong>${escapeHtml(league.league || league.title || 'Железо')}</strong></div>
-        <div class="profile-stat"><span>Крупнейший выигрыш</span><strong>${moneyHtml(league.biggest_win || 0)}</strong></div>
-        <div class="profile-stat"><span>Крупнейший проигрыш</span><strong>${moneyHtml(league.biggest_loss || 0)}</strong></div>
-        <div class="profile-stat"><span>Крупнейший кэф</span><strong>${league.biggest_win_odds ? Number(league.biggest_win_odds).toFixed(2) : 'пока нет'}</strong></div>
+    <div class="profile-stats-grid">
+      <div class="profile-stat"><span>Крупнейший выигрыш</span><strong>${moneyHtml(league.biggest_win || 0)}</strong></div>
+      <div class="profile-stat"><span>Крупнейший проигрыш</span><strong>${moneyHtml(league.biggest_loss || 0)}</strong></div>
+      <div class="profile-stat"><span>Крупнейший кэф</span><strong>${league.biggest_win_odds ? Number(league.biggest_win_odds).toFixed(2) : 'пока нет'}</strong></div>
         <div class="profile-stat"><span>Место</span><strong>${league.rank ? `#${league.rank}` : 'пока нет'}</strong></div>
       </div>
   `;
@@ -1074,7 +1073,7 @@ function renderLeague() {
       </div>
       <div class="profile-progress league-progress"><i style="width:${Number(current.progress_percent || 0)}%"></i></div>
       <div class="league-scale"><span>${moneyHtml(0)}</span><span>${moneyHtml(scaleEnd)}</span></div>
-      <p>${current.next_title ? `До ранга ${escapeHtml(current.next_title)} осталось ${moneyHtml(current.remaining || 0)}` : 'Вы достигли максимального ранга'}</p>
+      <p>${current.next_title ? `До уровня ${escapeHtml(current.next_title)} осталось ${moneyHtml(current.remaining || 0)}` : 'Вы достигли максимального уровня'}</p>
     </article>
     <article class="panel daily-panel ${daily.available ? 'claimable' : 'claimed'}">
       <h2>Ежедневная награда</h2>
@@ -1148,16 +1147,12 @@ function renderWheelList(spins) {
     const countText = spin.unlimited ? 'без лимита' : `${spin.count} шт.`;
     return `
       <button class="wheel-button" data-spin-wheel="${escapeAttr(spin.ids[0])}" type="button">
-        <span class="wheel-button-icon">${wheelInitial(spin.wheel_type)}</span>
+        <span class="wheel-button-icon wheel-type-${escapeAttr(spin.wheel_type || 'default')}" aria-hidden="true"></span>
         <span><strong>${escapeHtml(spin.wheel_title || 'Колесо')}</strong><small>${escapeHtml(countText)}</small></span>
         <b>Крутить</b>
       </button>
     `;
   }).join('');
-}
-
-function wheelInitial(type = '') {
-  return ({ small: 'М', standard: 'О', large: 'Б', elite: 'Э' }[type] || 'К');
 }
 
 function renderLeagueTimeline(rewards, tiers = []) {
@@ -1185,7 +1180,7 @@ function renderLeagueTimeline(rewards, tiers = []) {
 
 function renderLeagueReward(reward, options = {}) {
   const parts = [];
-  if (reward.kind === 'rank') parts.push(`новый ранг ${escapeHtml(reward.title)}`);
+  if (reward.kind === 'rank') parts.push(`новый уровень ${escapeHtml(reward.title)}`);
   if (reward.stars) parts.push(`награда ${moneyHtml(reward.stars)}`);
   if (reward.wheel_title) parts.push(escapeHtml(reward.wheel_title));
   const compactClass = options.compact ? 'compact' : '';
@@ -1215,6 +1210,11 @@ function renderRating() {
   const leaderboard = leaderboards[state.ratingMode] || [];
   root.innerHTML = `
     <article class="league-hero-card">
+      <div class="rating-tabs">
+        ${Object.entries(modes).map(([key, item]) => `
+          <button class="${state.ratingMode === key ? 'active' : ''}" type="button" data-rating-mode="${key}">${escapeHtml(item.title)}</button>
+        `).join('')}
+      </div>
       <p class="label">Рейтинг</p>
       <div class="league-hero-title">
         <h2>${escapeHtml(mode.title)}</h2>
@@ -1223,11 +1223,6 @@ function renderRating() {
       <p>${escapeHtml(mode.description)}</p>
     </article>
     <article class="panel">
-      <div class="rating-tabs">
-        ${Object.entries(modes).map(([key, item]) => `
-          <button class="${state.ratingMode === key ? 'active' : ''}" type="button" data-rating-mode="${key}">${escapeHtml(item.title)}</button>
-        `).join('')}
-      </div>
       <div class="leaderboard-list">
         ${leaderboard.length ? leaderboard.map((row) => `
           <div class="leaderboard-row">
@@ -1310,26 +1305,27 @@ function showWheelLoading(wheel, spin) {
     <div class="fortune-wheel">
       ${segments.map((segment, index) => {
         const segmentSize = 360 / Math.max(segments.length, 1);
-        const angle = Math.round((segmentSize * index) + (segmentSize / 2));
+        const angle = Math.round(-18 + (segmentSize * index) + (segmentSize / 2));
         return `<span style="--angle:${angle}deg"><b>${money(segment.stars)}</b></span>`;
       }).join('')}
     </div>
     <div class="wheel-prize" hidden></div>
-    <button class="wheel-close-button" type="button" aria-label="Закрыть">×</button>
     <button class="primary wheel-start-button" type="button">Крутить</button>
   `;
+  const closeButton = document.createElement('button');
+  closeButton.className = 'wheel-close-button';
+  closeButton.type = 'button';
+  closeButton.setAttribute('aria-label', 'Закрыть');
+  closeButton.textContent = '×';
+  card.appendChild(closeButton);
   card.appendChild(stage);
   return new Promise((resolve) => {
-    const closeButton = stage.querySelector('.wheel-close-button');
     const startButton = stage.querySelector('.wheel-start-button');
     closeButton.addEventListener('click', () => resolve(false), { once: true });
     startButton.addEventListener('click', () => {
       startButton.disabled = true;
       closeButton.hidden = true;
       document.querySelector('#loading-text').textContent = 'Колесо набирает скорость...';
-      tg?.HapticFeedback?.impactOccurred('light');
-      window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('medium'), 650);
-      window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('light'), 1250);
       resolve(true);
     }, { once: true });
   });
@@ -1339,12 +1335,16 @@ function startWheelSpin(prizeIndex, totalSegments) {
   const modal = document.querySelector('#loading-modal');
   const wheelNode = modal.querySelector('.fortune-wheel');
   const segmentSize = 360 / Math.max(totalSegments, 1);
-  const prizeCenterAngle = (prizeIndex * segmentSize) + (segmentSize / 2);
+  const prizeCenterAngle = -18 + (prizeIndex * segmentSize) + (segmentSize / 2);
   const stopRotation = 360 * 5 - prizeCenterAngle;
   wheelNode?.style.setProperty('--stop-rotation', `${Math.round(stopRotation)}deg`);
   if (wheelNode) wheelNode.dataset.stopRotation = `${Math.round(stopRotation)}deg`;
   modal.classList.remove('wheel-ready');
   modal.classList.add('wheel-spinning');
+  tg?.HapticFeedback?.impactOccurred('light');
+  window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('medium'), 650);
+  window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('light'), 1250);
+  window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('medium'), 1900);
 }
 
 function finishWheelLoading(prize) {
@@ -1581,7 +1581,7 @@ function renderUsers() {
         <label>Username <input data-user-username="${user.id}" value="${escapeAttr(user.username || '')}" autocomplete="off"></label>
         <label>Имя <input data-user-first="${user.id}" value="${escapeAttr(user.first_name || '')}" autocomplete="off"></label>
         <label>Фамилия <input data-user-last="${user.id}" value="${escapeAttr(user.last_name || '')}" autocomplete="off"></label>
-        <div class="readonly-field"><span>Ранг</span><strong>${escapeHtml(clientStatusLabels[user.client_status] || user.client_status || 'Железо')}</strong></div>
+        <div class="readonly-field"><span>Уровень</span><strong>${escapeHtml(clientStatusLabels[user.client_status] || user.client_status || 'Железо')}</strong></div>
         <label>Баланс <input data-user-balance="${user.id}" type="number" min="0" step="10" value="${Number(wallet?.balance || 0)}"></label>
         <label class="checkbox-row"><input data-user-blocked="${user.id}" type="checkbox" ${user.is_blocked ? 'checked' : ''}> Заблокирован</label>
         <button class="primary" data-save-user="${user.id}">Сохранить</button>

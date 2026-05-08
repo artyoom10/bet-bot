@@ -196,8 +196,8 @@ h3 { margin: 0; font-size: 15px; }
 .nav-admin.active .nav-label { display: block; }
 .status { margin-bottom: 10px; padding: 11px 13px; color: var(--accent-2); font-weight: 700; }
 .status[hidden], .view, .admin-page { display: none; }
-.view.active, .admin-page.active { display: block; }
-#view-events.active { padding-top: 12px; }
+.view.active, .admin-page.active { display: block; padding-top: 18px; }
+#view-events.active { padding-top: 18px; }
 
 .sports-strip { display: flex; gap: 9px; margin-bottom: 12px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
 .sport-chip {
@@ -879,7 +879,7 @@ h3 { margin: 0; font-size: 15px; }
 .loading-card {
   max-width: 330px;
   gap: 16px;
-  padding: 26px 22px;
+  padding: 32px 22px 26px;
 }
 .loading-card h2 {
   margin-bottom: -4px;
@@ -1136,8 +1136,8 @@ h3 { margin: 0; font-size: 15px; }
 }
 .wheel-close-button {
   position: absolute;
-  top: -8px;
-  right: -8px;
+  top: 16px;
+  right: 16px;
   z-index: 4;
   display: grid;
   place-items: center;
@@ -1364,6 +1364,7 @@ h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
 .daily-panel.claimable { border-color: rgba(22, 163, 106, .28); background: #f1fff7; }
 .daily-panel.claimed { background: #f4fbff; }
 .daily-panel p { margin-bottom: 8px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.daily-panel .primary { margin-top: 10px; }
 .daily-track {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1518,7 +1519,7 @@ h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   border-radius: 16px;
   padding: 4px;
   background: var(--surface-2);
@@ -1554,10 +1555,20 @@ h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
   width: 42px;
   height: 42px;
   border-radius: 50%;
-  color: #fff;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  font-weight: 950;
 }
+.wheel-button-icon::after {
+  content: "";
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .58);
+}
+.wheel-type-small { background: linear-gradient(135deg, #9ed8a8, #eafff3); }
+.wheel-type-standard { background: linear-gradient(135deg, #77b7ff, #dfeeff); }
+.wheel-type-large { background: linear-gradient(135deg, #b9c7ff, #f1efff); }
+.wheel-type-elite { background: linear-gradient(135deg, #f3b51f, #fff3c6); }
+.wheel-type-default { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
 .wheel-button span:not(.wheel-button-icon) { display: grid; gap: 2px; min-width: 0; }
 .wheel-button span small, .leaderboard-row em { color: var(--muted); font-size: 12px; font-style: normal; font-weight: 800; }
 .wheel-button strong, .leaderboard-row b { color: var(--accent-2); font-weight: 950; }
