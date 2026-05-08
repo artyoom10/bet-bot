@@ -35,7 +35,7 @@
 - `lib/admin_aliases.py`: команды, алиасы, русские названия и применение алиасов к событиям.
 - `lib/events.py`: выдача линии для Mini App, форматирование команд, markets и outcomes.
 - `lib/bets.py`: валидация купона, создание single/express ставок, история ставок, ручной admin settlement и удаление ставки.
-- `lib/league.py`: игровой прогресс пользователя. Считает общий выигрыш по wallet transactions, определяет звание/лигу, выдаёт разовые награды, создаёт доступные прокрутки колеса фортуны и начисляет призы.
+- `lib/league.py`: игровой прогресс пользователя. Считает чистую прибыль по рассчитанным выигрышным ставкам (`payout - amount`), определяет ранг/лигу, отдаёт рейтинг, выдаёт разовые награды, ежедневные награды, создаёт доступные прокрутки колеса фортуны и начисляет призы.
 - `lib/odds_api.py`: HTTP calls к The Odds API; для хоккея регионы берутся из `ODDS_API_HOCKEY_REGIONS`, для остальных видов спорта из `ODDS_API_REGIONS`.
 - `lib/odds_sync.py`: sync sports/events/odds, detailed event markets, sync_runs debug; нормализует базовые и detailed markets в русские названия исходов; fast sync пишет odds bulk upsert, не пишет snapshots, ограничивает ближайшие события через `ODDS_SYNC_MAX_EVENTS` и логирует в `admin_logs` компактный summary.
 - `lib/settlement.py`: sync scores, ручной результат, `result_note` для ОТ/буллитов, расчёт pending ставок.
@@ -53,10 +53,12 @@
 8. Пользователь выбирает исходы; frontend отправляет `/api/bets` с amount и selections.
 9. `lib/bets.py` валидирует odds, списывает demo-баланс, создаёт `bets`, `bet_selections`, `wallet_transactions`.
 10. Админ запускает scores/manual settlement; `lib/settlement.py` обновляет events, bet selections, bets и wallet. Для хоккея ручной расчёт может сохранить `result_note=ot|so`.
-11. `/api/league` считает прогресс игрока по суммарным `bet_win` начислениям, синхронизирует `users.client_status` с текущим званием и отдаёт шкалу наград/колёса/рейтинг.
-12. При получении награды backend пишет `user_league_rewards`, начисляет звёзды через `wallet_transactions.type='league_reward'` и/или создаёт `fortune_wheel_spins.status='available'`.
-13. При прокрутке колеса backend выбирает приз по weighted random, обновляет spin в `spun`, начисляет `wallet_transactions.type='wheel_prize'`.
-14. Frontend обновляет историю ставок, баланс и прогресс через `/api/bets`, `/api/me`, `/api/league`.
+11. `/api/league` считает прогресс игрока по чистой прибыли из таблицы `bets`, синхронизирует `users.client_status` с текущим рангом и отдаёт шкалу наград/колёса/рейтинг.
+12. `league_rank_aliases` хранит отображаемое имя и `logo_url` ранга. Эти данные используются как аватар ранга рядом с именем игрока.
+13. При получении награды backend пишет `user_league_rewards`, начисляет звёзды через `wallet_transactions.type='league_reward'` и/или создаёт `fortune_wheel_spins.status='available'`.
+14. При ежедневной награде backend пишет `daily_login_rewards` по московской дате, проверяет последовательность дней и начисляет `wallet_transactions.type='daily_login_reward'`.
+15. При прокрутке колеса backend выбирает приз по weighted random, обновляет spin в `spun`, начисляет `wallet_transactions.type='wheel_prize'`.
+16. Frontend обновляет историю ставок, баланс, профиль, лигу и рейтинг через `/api/bets`, `/api/me`, `/api/league`.
 
 ## Ограничения
 
@@ -97,3 +99,4 @@
 - Целевые FK-правила: `events.sport_key -> sports(sport_key) on delete cascade`, `odds_current/odds_snapshots.event_id -> events(id) on delete cascade`, `bet_selections.event_id -> events(id) on delete set null`, `bets.user_id/wallets.user_id/wallet_transactions.user_id -> users(id) on delete cascade`, admin/sync/settlement references to users use `on delete set null`.
 - `wallet_transactions.related_bet_id` должен ссылаться на `bets(id) on delete set null`, чтобы физическое удаление ставки не блокировалось журналом кошелька.
 - Таблицы прогресса `user_league_rewards` и `fortune_wheel_spins` ссылаются на `users(id) on delete cascade`.
+- Таблица ежедневных наград `daily_login_rewards` также ссылается на `users(id) on delete cascade`; уникальность `unique(user_id, reward_date)` не даёт забрать дневной бонус дважды.

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from lib.errors import AppError
@@ -9,29 +9,33 @@ from lib.supabase_client import SupabaseRestClient
 from lib.users import first
 
 
+MOSCOW_TZ = timezone(timedelta(hours=3))
+
 LEAGUE_TIERS = [
-    {"threshold": 0, "title": "Новичок"},
-    {"threshold": 500, "title": "Игрок"},
-    {"threshold": 1000, "title": "Аналитик"},
-    {"threshold": 2500, "title": "Рисковый"},
-    {"threshold": 5000, "title": "Профи"},
-    {"threshold": 10000, "title": "Акула"},
-    {"threshold": 25000, "title": "Магнат"},
-    {"threshold": 50000, "title": "Легенда"},
-    {"threshold": 100000, "title": "Босс"},
+    {"threshold": 0, "title": "Железо"},
+    {"threshold": 2500, "title": "Бронза"},
+    {"threshold": 7500, "title": "Серебро"},
+    {"threshold": 15000, "title": "Золото"},
+    {"threshold": 30000, "title": "Платина"},
+    {"threshold": 50000, "title": "Изумруд"},
+    {"threshold": 80000, "title": "Сапфир"},
+    {"threshold": 125000, "title": "Рубин"},
+    {"threshold": 200000, "title": "Алмаз"},
 ]
 
-REWARD_STEPS = [
-    {"threshold": 100, "title": "Новичок", "stars": 100, "wheel_type": None},
-    {"threshold": 500, "title": "Игрок", "stars": 0, "wheel_type": "small"},
-    {"threshold": 1000, "title": "Аналитик", "stars": 250, "wheel_type": None},
-    {"threshold": 2500, "title": "Рисковый", "stars": 0, "wheel_type": "standard"},
-    {"threshold": 5000, "title": "Профи", "stars": 500, "wheel_type": None},
-    {"threshold": 10000, "title": "Акула", "stars": 0, "wheel_type": "large"},
-    {"threshold": 25000, "title": "Магнат", "stars": 1000, "wheel_type": None},
-    {"threshold": 50000, "title": "Легенда", "stars": 0, "wheel_type": "elite"},
-    {"threshold": 100000, "title": "Босс", "stars": 2500, "wheel_type": None},
+BONUS_REWARD_STEPS = [
+    {"threshold": 100, "kind": "stars", "stars": 100, "wheel_type": None, "title": None},
+    {"threshold": 500, "kind": "wheel", "stars": 0, "wheel_type": "small", "title": None},
+    {"threshold": 1000, "kind": "stars", "stars": 250, "wheel_type": None, "title": None},
+    {"threshold": 2500, "kind": "wheel", "stars": 0, "wheel_type": "standard", "title": None},
+    {"threshold": 5000, "kind": "stars", "stars": 500, "wheel_type": None, "title": None},
+    {"threshold": 10000, "kind": "wheel", "stars": 0, "wheel_type": "large", "title": None},
+    {"threshold": 25000, "kind": "stars", "stars": 1000, "wheel_type": None, "title": None},
+    {"threshold": 50000, "kind": "wheel", "stars": 0, "wheel_type": "elite", "title": None},
+    {"threshold": 100000, "kind": "stars", "stars": 2500, "wheel_type": None, "title": None},
 ]
+
+DAILY_REWARDS = [100, 150, 200, 250, 300, 350, 500]
 
 WHEELS = {
     "small": {
@@ -78,9 +82,12 @@ WHEELS = {
 
 
 def get_league_payload(db: SupabaseRestClient, user: dict[str, Any]) -> dict[str, Any]:
+    rank_aliases = get_rank_aliases(db)
     stats = calculate_user_stats(db, user["id"])
-    tier = tier_for_total(stats["total_win"])
-    next_tier = next_tier_for_total(stats["total_win"])
+    tier = with_alias(tier_for_total(stats["total_profit"]), rank_aliases)
+    next_tier = next_tier_for_total(stats["total_profit"])
+    if next_tier:
+        next_tier = with_alias(next_tier, rank_aliases)
     sync_user_title(db, user, tier["title"])
 
     claimed_rows = db.select(
@@ -98,35 +105,37 @@ def get_league_payload(db: SupabaseRestClient, user: dict[str, Any]) -> dict[str
             "limit": "20",
         },
     )
-    leaderboard = build_leaderboard(db)
+    leaderboard = build_leaderboard(db, rank_aliases)
 
     return {
         "current": {
             **stats,
             "title": tier["title"],
             "league": tier["title"],
+            "rank_logo_url": tier.get("logo_url"),
             "threshold": tier["threshold"],
             "next_title": next_tier["title"] if next_tier else None,
             "next_threshold": next_tier["threshold"] if next_tier else None,
-            "remaining": max(0, (next_tier["threshold"] - stats["total_win"]) if next_tier else 0),
-            "progress_percent": progress_percent(stats["total_win"], tier, next_tier),
-            "rank": leaderboard_rank(leaderboard, user["id"], stats["total_win"]),
+            "remaining": max(0, (next_tier["threshold"] - stats["total_profit"]) if next_tier else 0),
+            "progress_percent": progress_percent(stats["total_profit"], tier, next_tier),
+            "rank": leaderboard_rank(leaderboard, user["id"], stats["total_profit"]),
         },
-        "tiers": tiers_payload(),
-        "rewards": rewards_payload(stats["total_win"], claimed_by_threshold),
+        "tiers": tiers_payload(rank_aliases),
+        "rewards": rewards_payload(stats["total_profit"], claimed_by_threshold, rank_aliases),
+        "daily_reward": daily_reward_payload(db, user["id"]),
         "wheels": public_wheels(),
         "pending_wheels": [spin_payload(spin) for spin in pending_spins],
-        "leaderboard": leaderboard[:10],
+        "leaderboard": leaderboard[:50],
     }
 
 
 def claim_league_reward(db: SupabaseRestClient, user: dict[str, Any], threshold: int) -> dict[str, Any]:
-    step = next((item for item in REWARD_STEPS if item["threshold"] == threshold), None)
+    step = next((item for item in BONUS_REWARD_STEPS if item["threshold"] == threshold), None)
     if not step:
         raise AppError("reward_not_found", "Награда не найдена", 404)
 
     stats = calculate_user_stats(db, user["id"])
-    if stats["total_win"] < threshold:
+    if stats["total_profit"] < threshold:
         raise AppError("reward_not_available", "Награда ещё недоступна", 400)
 
     existing = first(
@@ -143,7 +152,7 @@ def claim_league_reward(db: SupabaseRestClient, user: dict[str, Any], threshold:
         {
             "user_id": user["id"],
             "threshold": threshold,
-            "title": step["title"],
+            "title": step["kind"],
             "stars_amount": step["stars"],
             "wheel_type": step["wheel_type"],
         },
@@ -161,9 +170,29 @@ def claim_league_reward(db: SupabaseRestClient, user: dict[str, Any], threshold:
             },
         )
 
-    tier = tier_for_total(stats["total_win"])
+    tier = tier_for_total(stats["total_profit"])
     sync_user_title(db, user, tier["title"])
     return get_league_payload(db, {**user, "client_status": tier["title"]})
+
+
+def claim_daily_reward(db: SupabaseRestClient, user: dict[str, Any]) -> dict[str, Any]:
+    daily = daily_reward_payload(db, user["id"])
+    if not daily["available"]:
+        raise AppError("daily_reward_unavailable", "Ежедневная награда уже получена", 400)
+
+    day = int(daily["next_day"])
+    amount = DAILY_REWARDS[day - 1]
+    db.insert(
+        "daily_login_rewards",
+        {
+            "user_id": user["id"],
+            "reward_date": daily["today"],
+            "streak_day": day,
+            "stars_amount": amount,
+        },
+    )
+    credit_wallet(db, user["id"], float(amount), "daily_login_reward", {"streak_day": day, "reward_date": daily["today"]})
+    return get_league_payload(db, user)
 
 
 def spin_fortune_wheel(db: SupabaseRestClient, user: dict[str, Any], spin_id: str) -> dict[str, Any]:
@@ -206,12 +235,12 @@ def spin_fortune_wheel(db: SupabaseRestClient, user: dict[str, Any], spin_id: st
 
 
 def calculate_user_stats(db: SupabaseRestClient, user_id: str) -> dict[str, Any]:
-    win_rows = db.select(
-        "wallet_transactions",
+    won_bets = db.select(
+        "bets",
         {
-            "select": "amount",
+            "select": "amount,payout,possible_win",
             "user_id": f"eq.{user_id}",
-            "type": "eq.bet_win",
+            "status": "eq.won",
             "limit": "1000",
         },
     )
@@ -228,68 +257,122 @@ def calculate_user_stats(db: SupabaseRestClient, user_id: str) -> dict[str, Any]
         "fortune_wheel_spins",
         {"select": "id", "user_id": f"eq.{user_id}", "status": "eq.spun", "limit": "1000"},
     )
-    wins = [float(row.get("amount") or 0) for row in win_rows if float(row.get("amount") or 0) > 0]
+    profits = [bet_profit(row) for row in won_bets]
     losses = [float(row.get("amount") or 0) for row in lost_bets if float(row.get("amount") or 0) > 0]
+    total_profit = round(sum(profits), 2)
     return {
-        "total_win": round(sum(wins), 2),
-        "biggest_win": round(max(wins), 2) if wins else 0,
+        "total_profit": total_profit,
+        "total_win": total_profit,
+        "biggest_win": round(max(profits), 2) if profits else 0,
         "biggest_loss": round(max(losses), 2) if losses else 0,
         "wheel_spins_count": len(spun),
     }
 
 
-def build_leaderboard(db: SupabaseRestClient) -> list[dict[str, Any]]:
-    tx_rows = db.select(
-        "wallet_transactions",
-        {"select": "user_id,amount", "type": "eq.bet_win", "limit": "5000"},
-    )
-    totals: dict[str, float] = {}
-    for row in tx_rows:
-        user_id = row.get("user_id")
-        amount = float(row.get("amount") or 0)
-        if user_id and amount > 0:
-            totals[user_id] = totals.get(user_id, 0) + amount
-    if not totals:
-        return []
-
-    user_ids = list(totals.keys())[:200]
+def build_leaderboard(db: SupabaseRestClient, rank_aliases: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     users = db.select(
         "users",
         {
-            "select": "id,username,first_name,last_name,client_status",
-            "id": f"in.({','.join(user_ids)})",
+            "select": "id,tg_id,username,first_name,last_name,client_status",
+            "order": "created_at.asc",
             "limit": "200",
         },
     )
-    users_by_id = {row["id"]: row for row in users}
+    users = [user for user in users if not str(user.get("tg_id") or "").startswith("deleted:")]
+    if not users:
+        return []
+
+    user_ids = [user["id"] for user in users]
+    won_bets = db.select(
+        "bets",
+        {
+            "select": "user_id,amount,payout,possible_win",
+            "status": "eq.won",
+            "user_id": f"in.({','.join(user_ids)})",
+            "limit": "5000",
+        },
+    )
+    totals = {user["id"]: 0.0 for user in users}
+    for bet in won_bets:
+        user_id = bet.get("user_id")
+        if user_id in totals:
+            totals[user_id] += bet_profit(bet)
+
     rows = []
-    for user_id, total in totals.items():
-        profile = users_by_id.get(user_id)
-        if not profile:
-            continue
-        tier = tier_for_total(total)
+    for profile in users:
+        total = round(totals.get(profile["id"], 0.0), 2)
+        tier = with_alias(tier_for_total(total), rank_aliases)
         rows.append(
             {
-                "user_id": user_id,
+                "user_id": profile["id"],
                 "name": display_name(profile),
                 "title": tier["title"],
-                "total_win": round(total, 2),
+                "rank_logo_url": tier.get("logo_url"),
+                "total_win": total,
+                "total_profit": total,
             }
         )
-    rows.sort(key=lambda item: item["total_win"], reverse=True)
-    return [{**item, "rank": index + 1} for index, item in enumerate(rows) if item["total_win"] >= 500]
+    rows.sort(key=lambda item: (-item["total_profit"], item["name"].lower()))
+    return [{**item, "rank": index + 1} for index, item in enumerate(rows)]
 
 
-def tier_for_total(total_win: float) -> dict[str, Any]:
+def daily_reward_payload(db: SupabaseRestClient, user_id: str) -> dict[str, Any]:
+    today = datetime.now(MOSCOW_TZ).date()
+    rows = db.select(
+        "daily_login_rewards",
+        {
+            "select": "*",
+            "user_id": f"eq.{user_id}",
+            "order": "reward_date.desc",
+            "limit": "1",
+        },
+    )
+    last = first(rows)
+    if not last:
+        next_day = 1
+        available = True
+    else:
+        last_date = parse_date(last["reward_date"])
+        if last_date == today:
+            next_day = int(last.get("streak_day") or 1)
+            available = False
+        elif last_date == today - timedelta(days=1):
+            next_day = min(7, int(last.get("streak_day") or 0) + 1)
+            available = True
+        else:
+            next_day = 1
+            available = True
+
+    return {
+        "available": available,
+        "today": today.isoformat(),
+        "next_day": next_day,
+        "amount": DAILY_REWARDS[next_day - 1],
+        "rewards": [{"day": index + 1, "stars": amount} for index, amount in enumerate(DAILY_REWARDS)],
+        "last_claimed_at": last.get("created_at") if last else None,
+    }
+
+
+def get_rank_aliases(db: SupabaseRestClient) -> dict[str, dict[str, Any]]:
+    try:
+        rows = db.select("league_rank_aliases", {"select": "*", "limit": "100"})
+    except AppError as exc:
+        if exc.error != "supabase_error":
+            raise
+        return {}
+    return {row["title"]: row for row in rows}
+
+
+def tier_for_total(total_profit: float) -> dict[str, Any]:
     current = LEAGUE_TIERS[0]
     for tier in LEAGUE_TIERS:
-        if total_win >= tier["threshold"]:
+        if total_profit >= tier["threshold"]:
             current = tier
     return current
 
 
-def next_tier_for_total(total_win: float) -> dict[str, Any] | None:
-    return next((tier for tier in LEAGUE_TIERS if total_win < tier["threshold"]), None)
+def next_tier_for_total(total_profit: float) -> dict[str, Any] | None:
+    return next((tier for tier in LEAGUE_TIERS if total_profit < tier["threshold"]), None)
 
 
 def sync_user_title(db: SupabaseRestClient, user: dict[str, Any], title: str) -> None:
@@ -330,16 +413,32 @@ def weighted_prize(wheel_type: str) -> int:
     return int(segments[-1]["stars"])
 
 
-def progress_percent(total_win: float, tier: dict[str, Any], next_tier: dict[str, Any] | None) -> float:
+def progress_percent(total_profit: float, tier: dict[str, Any], next_tier: dict[str, Any] | None) -> float:
     if not next_tier:
         return 100
     span = max(1, next_tier["threshold"] - tier["threshold"])
-    return round(min(100, max(0, (total_win - tier["threshold"]) / span * 100)), 1)
+    return round(min(100, max(0, (total_profit - tier["threshold"]) / span * 100)), 1)
 
 
-def rewards_payload(total_win: float, claimed_by_threshold: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+def rewards_payload(total_profit: float, claimed_by_threshold: dict[int, dict[str, Any]], rank_aliases: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
-    for step in REWARD_STEPS:
+    for tier in LEAGUE_TIERS[1:]:
+        rank = with_alias(tier, rank_aliases)
+        rows.append(
+            {
+                "threshold": rank["threshold"],
+                "kind": "rank",
+                "title": rank["title"],
+                "stars": 0,
+                "wheel_type": None,
+                "wheel_title": None,
+                "logo_url": rank.get("logo_url"),
+                "claimed": total_profit >= rank["threshold"],
+                "eligible": total_profit >= rank["threshold"],
+                "claimable": False,
+            }
+        )
+    for step in BONUS_REWARD_STEPS:
         claimed = claimed_by_threshold.get(step["threshold"])
         wheel_type = step["wheel_type"]
         rows.append(
@@ -348,17 +447,18 @@ def rewards_payload(total_win: float, claimed_by_threshold: dict[int, dict[str, 
                 "wheel_title": WHEELS[wheel_type]["title"] if wheel_type else None,
                 "claimed": bool(claimed),
                 "claimed_at": claimed.get("claimed_at") if claimed else None,
-                "eligible": total_win >= step["threshold"],
-                "claimable": total_win >= step["threshold"] and not claimed,
+                "eligible": total_profit >= step["threshold"],
+                "claimable": total_profit >= step["threshold"] and not claimed,
             }
         )
+    rows.sort(key=lambda item: (item["threshold"], 0 if item["kind"] == "rank" else 1))
     return rows
 
 
-def tiers_payload() -> list[dict[str, Any]]:
+def tiers_payload(rank_aliases: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
-            **tier,
+            **with_alias(tier, rank_aliases),
             "next_threshold": LEAGUE_TIERS[index + 1]["threshold"] if index + 1 < len(LEAGUE_TIERS) else None,
         }
         for index, tier in enumerate(LEAGUE_TIERS)
@@ -393,17 +493,37 @@ def spin_payload(spin: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def leaderboard_rank(leaderboard: list[dict[str, Any]], user_id: str, total_win: float) -> int | None:
+def leaderboard_rank(leaderboard: list[dict[str, Any]], user_id: str, total_profit: float) -> int | None:
     for row in leaderboard:
         if row["user_id"] == user_id:
             return row["rank"]
-    if total_win <= 0:
+    if total_profit <= 0:
         return None
-    return 1 + sum(1 for row in leaderboard if row["total_win"] > total_win)
+    return 1 + sum(1 for row in leaderboard if row["total_profit"] > total_profit)
+
+
+def with_alias(tier: dict[str, Any], aliases: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    alias = aliases.get(tier["title"]) or {}
+    return {
+        **tier,
+        "title": alias.get("display_name") or tier["title"],
+        "base_title": tier["title"],
+        "logo_url": alias.get("logo_url"),
+    }
+
+
+def bet_profit(bet: dict[str, Any]) -> float:
+    amount = float(bet.get("amount") or 0)
+    payout = float(bet.get("payout") or bet.get("possible_win") or 0)
+    return max(0.0, round(payout - amount, 2))
 
 
 def display_name(user: dict[str, Any]) -> str:
     return " ".join([item for item in [user.get("first_name"), user.get("last_name")] if item]) or user.get("username") or "Игрок"
+
+
+def parse_date(value: str) -> Any:
+    return datetime.fromisoformat(str(value)).date()
 
 
 def now_iso() -> str:

@@ -1,12 +1,12 @@
 -- League progression, one-time rewards, wheel spins and safer cascade deletion.
 -- Run in Supabase SQL editor after the previous cascade/logo migrations.
 
-alter table users alter column client_status set default 'Новичок';
+alter table users alter column client_status set default 'Железо';
 
 update users
-set client_status = 'Новичок'
+set client_status = 'Железо'
 where client_status is null
-   or client_status in ('new', 'active', 'vip', 'test', 'restricted', 'suspended', 'telegram_only');
+   or client_status in ('new', 'active', 'vip', 'test', 'restricted', 'suspended', 'telegram_only', 'Новичок', 'Игрок', 'Аналитик', 'Рисковый', 'Профи', 'Акула', 'Магнат', 'Легенда', 'Босс');
 
 create table if not exists user_league_rewards (
   id uuid primary key default gen_random_uuid(),
@@ -33,6 +33,38 @@ create table if not exists fortune_wheel_spins (
 
 create index if not exists idx_user_league_rewards_user on user_league_rewards(user_id, threshold);
 create index if not exists idx_fortune_wheel_spins_user on fortune_wheel_spins(user_id, status, created_at desc);
+
+create table if not exists league_rank_aliases (
+  title text primary key,
+  display_name text,
+  logo_url text,
+  updated_at timestamptz not null default now()
+);
+
+insert into league_rank_aliases(title, display_name)
+values
+  ('Железо', 'Железо'),
+  ('Бронза', 'Бронза'),
+  ('Серебро', 'Серебро'),
+  ('Золото', 'Золото'),
+  ('Платина', 'Платина'),
+  ('Изумруд', 'Изумруд'),
+  ('Сапфир', 'Сапфир'),
+  ('Рубин', 'Рубин'),
+  ('Алмаз', 'Алмаз')
+on conflict (title) do nothing;
+
+create table if not exists daily_login_rewards (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  reward_date date not null,
+  streak_day integer not null,
+  stars_amount numeric(18, 2) not null,
+  created_at timestamptz not null default now(),
+  unique(user_id, reward_date)
+);
+
+create index if not exists idx_daily_login_rewards_user_date on daily_login_rewards(user_id, reward_date desc);
 
 alter table wallets drop constraint if exists wallets_user_id_fkey;
 alter table wallets

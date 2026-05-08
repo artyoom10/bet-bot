@@ -104,7 +104,7 @@ h3 { margin: 0; font-size: 15px; }
   text-align: right;
 }
 .balance strong { color: var(--accent-2); font-size: 17px; line-height: 1.05; }
-.balance span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 800; line-height: 1.1; }
+.balance span { display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 800; line-height: 1.1; }
 .balance-refresh {
   display: grid;
   place-items: center;
@@ -1041,6 +1041,75 @@ h3 { margin: 0; font-size: 15px; }
   border-radius: 50%;
   animation: successRing 2300ms ease-out 120ms both;
 }
+.loading-modal.wheel-mode .spinner { display: none; }
+.wheel-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 230px;
+}
+.wheel-pointer {
+  position: absolute;
+  top: 4px;
+  z-index: 2;
+  width: 0;
+  height: 0;
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-top: 20px solid var(--accent-2);
+  filter: drop-shadow(0 4px 8px rgba(16, 24, 40, .18));
+}
+.fortune-wheel {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 210px;
+  height: 210px;
+  border: 10px solid #fff;
+  border-radius: 50%;
+  background:
+    conic-gradient(from -18deg, #e8f3ff 0 20%, #fff7dc 20% 40%, #e9fff2 40% 60%, #f1efff 60% 80%, #ffeaf2 80% 100%);
+  box-shadow: 0 18px 52px rgba(27, 72, 124, .18), inset 0 0 0 1px var(--border);
+  animation: wheelSpin 2400ms cubic-bezier(.16, .74, .2, 1) infinite;
+}
+.fortune-wheel::after {
+  content: "";
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  border: 8px solid #fff;
+  border-radius: 50%;
+  background: var(--accent-2);
+  box-shadow: 0 8px 20px rgba(47, 128, 237, .22);
+}
+.fortune-wheel span {
+  position: absolute;
+  inset: 14px;
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  padding-top: 8px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 950;
+  transform: rotate(calc(360deg / var(--n) * var(--i)));
+}
+.wheel-finished .fortune-wheel { animation: wheelStop 1800ms cubic-bezier(.12, .78, .16, 1) forwards; }
+.wheel-prize {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  min-width: 112px;
+  border-radius: 999px;
+  padding: 10px 16px;
+  color: var(--accent-2);
+  background: #fff;
+  box-shadow: 0 14px 36px rgba(27, 72, 124, .18);
+  font-size: 20px;
+  font-weight: 950;
+  animation: prizePop 520ms ease both;
+}
 .loading-confetti {
   position: absolute;
   inset: 0;
@@ -1061,6 +1130,18 @@ h3 { margin: 0; font-size: 15px; }
   animation: confettiBurst 4200ms cubic-bezier(.12, .76, .2, 1) var(--delay) both;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes wheelSpin {
+  0% { transform: rotate(0); }
+  100% { transform: rotate(1080deg); }
+}
+@keyframes wheelStop {
+  from { transform: rotate(0); }
+  to { transform: rotate(1280deg); }
+}
+@keyframes prizePop {
+  from { opacity: 0; transform: translateY(10px) scale(.86); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 @keyframes successPop {
   from { opacity: .86; transform: translateY(10px) scale(.96); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -1173,6 +1254,25 @@ h3 { margin: 0; font-size: 15px; }
   padding: 14px;
   background: linear-gradient(180deg, #fff 0%, #eef6ff 100%);
 }
+.profile-rank-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.rank-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  object-fit: contain;
+  padding: 2px;
+  background: #fff;
+  color: var(--accent-2);
+  font-size: 11px;
+  font-weight: 950;
+  vertical-align: middle;
+}
+h2 .rank-avatar { width: 32px; height: 32px; margin-left: 8px; }
+.rank-avatar.placeholder { padding: 0; }
 .profile-rank-card span, .league-hero-card .label { color: var(--muted); font-size: 12px; font-weight: 850; text-transform: uppercase; }
 .profile-rank-card strong { color: var(--accent-2); font-size: 24px; font-weight: 950; }
 .profile-rank-card small, .profile-rank-card em, .league-hero-card p { margin: 0; color: var(--muted); font-size: 13px; font-style: normal; font-weight: 750; }
@@ -1188,6 +1288,8 @@ h3 { margin: 0; font-size: 15px; }
   border-radius: inherit;
   background: linear-gradient(90deg, var(--accent), #77b7ff);
 }
+.profile-balance { display: inline-flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.profile-balance-label { color: var(--muted); font-size: 12px; font-weight: 850; }
 .profile-stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1215,6 +1317,31 @@ h3 { margin: 0; font-size: 15px; }
 .league-hero-title h2 { margin-bottom: 0; font-size: 28px; }
 .league-hero-title strong { color: var(--accent-2); font-size: 20px; font-weight: 950; }
 .league-progress { height: 12px; }
+.league-scale { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; font-weight: 850; }
+.league-description { margin: -4px 0 10px; color: var(--muted); font-size: 13px; font-weight: 650; line-height: 1.45; }
+.daily-panel.claimable { border-color: rgba(22, 163, 106, .28); background: #f1fff7; }
+.daily-panel.claimed { background: #f4fbff; }
+.daily-panel p { margin-bottom: 8px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.daily-track {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(64px, 1fr));
+  gap: 7px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.daily-track span {
+  display: grid;
+  gap: 4px;
+  min-width: 64px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 8px;
+  background: #fff;
+  text-align: center;
+}
+.daily-track span.active { border-color: rgba(22, 163, 106, .36); background: #eafff3; }
+.daily-track small { color: var(--muted); font-size: 10px; font-weight: 850; }
+.daily-track strong { color: var(--accent-2); font-size: 12px; font-weight: 950; white-space: nowrap; }
 .league-timeline {
   position: relative;
   display: grid;
@@ -1240,6 +1367,7 @@ h3 { margin: 0; font-size: 15px; }
   padding: 10px;
   background: #fff;
 }
+.league-step.claimed { border-color: rgba(22, 163, 106, .24); background: #effff6; }
 .league-step-dot {
   z-index: 1;
   width: 26px;
@@ -1252,6 +1380,8 @@ h3 { margin: 0; font-size: 15px; }
 .league-step.claimed .league-step-dot { background: var(--success); }
 .league-step.claimable { border-color: rgba(47, 128, 237, .38); box-shadow: 0 10px 24px rgba(47, 128, 237, .12); }
 .league-step strong { display: block; color: var(--text); font-size: 16px; }
+.league-step .reward-threshold { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.league-step .currency-star { display: inline; }
 .league-step span { display: block; color: var(--muted); font-size: 12px; font-weight: 750; line-height: 1.35; }
 .league-step em { color: var(--muted); font-style: normal; font-size: 12px; font-weight: 850; }
 .league-step .primary { min-height: 36px; padding: 8px 10px; border-radius: 12px; }
@@ -1269,8 +1399,22 @@ h3 { margin: 0; font-size: 15px; }
 .wheel-button span, .leaderboard-row em { color: var(--muted); font-size: 12px; font-style: normal; font-weight: 800; }
 .wheel-button strong, .leaderboard-row b { color: var(--accent-2); font-weight: 950; }
 .leaderboard-row { grid-template-columns: 38px minmax(0, 1fr) auto; }
-.leaderboard-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.leaderboard-row strong { display: inline-flex; align-items: center; gap: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .leaderboard-row b { grid-column: 2 / 4; justify-self: end; }
+.leaderboard-rank {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: #fff;
+  background: #9aa8b9;
+  font-size: 13px;
+  font-weight: 950;
+}
+.leaderboard-rank.rank-1 { background: linear-gradient(135deg, #f7c948, #d99a00); }
+.leaderboard-rank.rank-2 { background: linear-gradient(135deg, #dbe4ee, #8b9aad); }
+.leaderboard-rank.rank-3 { background: linear-gradient(135deg, #d49a62, #995c2d); }
 .notice-modal {
   position: fixed;
   inset: 0;

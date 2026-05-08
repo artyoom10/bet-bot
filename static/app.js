@@ -35,17 +35,18 @@ const labels = { home_win: 'П1', draw: 'X', away_win: 'П2', home_or_draw: '1X'
 const statusLabels = { pending: 'ожидает', won: 'выигрыш', lost: 'проигрыш', refund: 'возврат', cancelled: 'отменена' };
 const eventStatusLabels = { upcoming: 'ожидает', finished: 'завершён', cancelled: 'отменён' };
 const clientStatusLabels = {
-  'Новичок': 'Новичок',
-  'Игрок': 'Игрок',
-  'Аналитик': 'Аналитик',
-  'Рисковый': 'Рисковый',
-  'Профи': 'Профи',
-  'Акула': 'Акула',
-  'Магнат': 'Магнат',
-  'Легенда': 'Легенда',
-  'Босс': 'Босс',
-  new: 'Новичок',
-  active: 'Новичок',
+  'Железо': 'Железо',
+  'Бронза': 'Бронза',
+  'Серебро': 'Серебро',
+  'Золото': 'Золото',
+  'Платина': 'Платина',
+  'Изумруд': 'Изумруд',
+  'Сапфир': 'Сапфир',
+  'Рубин': 'Рубин',
+  'Алмаз': 'Алмаз',
+  new: 'Железо',
+  active: 'Железо',
+  'Новичок': 'Железо',
 };
 const sportTypeLabels = { soccer: 'Футбол', hockey: 'Хоккей', esports: 'Киберспорт' };
 const marketTitles = {
@@ -157,7 +158,7 @@ function unlockBodyScroll(reason) {
 function showLoading(title, text = 'Подождите, операция выполняется.') {
   const modal = document.querySelector('#loading-modal');
   modal.className = 'loading-modal';
-  modal.querySelectorAll('.loading-confetti').forEach((item) => item.remove());
+  modal.querySelectorAll('.loading-confetti, .wheel-stage').forEach((item) => item.remove());
   document.querySelector('#loading-title').textContent = title;
   document.querySelector('#loading-text').textContent = text;
   modal.hidden = false;
@@ -170,23 +171,27 @@ function updateLoading(text) {
 
 function showLoadingSuccess(title = 'Готово', text = '') {
   showLoading(title, text);
+  addSuccessConfetti(64);
+  triggerSuccessHaptics();
+}
+
+function addSuccessConfetti(count = 64) {
   const modal = document.querySelector('#loading-modal');
   modal.classList.add('success');
   const card = modal.querySelector('.loading-card');
   const confetti = document.createElement('div');
   confetti.className = 'loading-confetti';
-  const colors = ['#2f80ed', '#16a36a', '#f3b51f', '#9cc8ff'];
-  for (let index = 0; index < 64; index += 1) {
+  const colors = ['#2f80ed', '#16a36a', '#f3b51f', '#9cc8ff', '#f08bb4'];
+  for (let index = 0; index < count; index += 1) {
     const piece = document.createElement('span');
-    piece.style.setProperty('--x', `${Math.round((Math.random() * 320) - 160)}px`);
-    piece.style.setProperty('--y', `${Math.round(150 + (Math.random() * 170))}px`);
+    piece.style.setProperty('--x', `${Math.round((Math.random() * 420) - 210)}px`);
+    piece.style.setProperty('--y', `${Math.round(170 + (Math.random() * 230))}px`);
     piece.style.setProperty('--r', `${Math.round((Math.random() * 360) - 180)}deg`);
-    piece.style.setProperty('--delay', `${Math.random() * 420}ms`);
+    piece.style.setProperty('--delay', `${Math.random() * 620}ms`);
     piece.style.setProperty('--confetti-color', colors[index % colors.length]);
     confetti.appendChild(piece);
   }
   card.appendChild(confetti);
-  triggerSuccessHaptics();
 }
 
 function triggerSuccessHaptics() {
@@ -199,7 +204,7 @@ function hideLoading() {
   const modal = document.querySelector('#loading-modal');
   modal.hidden = true;
   modal.className = 'loading-modal';
-  modal.querySelectorAll('.loading-confetti').forEach((item) => item.remove());
+  modal.querySelectorAll('.loading-confetti, .wheel-stage').forEach((item) => item.remove());
   unlockBodyScroll('loading');
 }
 
@@ -340,6 +345,7 @@ async function init() {
     return false;
   });
   if (!canUseApp) return;
+  await loadLeague({ silent: true }).catch((error) => status(`Лига не загружена: ${error.message}`));
   await loadSports({ render: false }).catch((error) => status(`Турниры не загружены: ${error.message}`));
   await loadEvents().catch((error) => status(`Линия не загружена: ${error.message}`));
   handleHash();
@@ -365,7 +371,7 @@ async function loadMe() {
 
 function renderMe() {
   const profileName = resolveProfileName(state.me);
-  document.querySelector('#profile-name').textContent = profileName;
+  document.querySelector('#profile-name').innerHTML = `${escapeHtml(profileName)}${rankAvatarHtml(state.league?.current, profileName)}`;
   document.querySelector('#balance-value').innerHTML = moneyHtml(state.me.wallet.balance);
   renderProfileView();
   return profileName;
@@ -412,6 +418,23 @@ function resolveProfileName(data) {
   const dbName = [data.user.first_name, data.user.last_name].filter(Boolean).join(' ');
   const tgName = [tgUser?.first_name, tgUser?.last_name].filter(Boolean).join(' ');
   return dbName || tgName || data.user.username || tgUser?.username || 'Игрок';
+}
+
+function rankAvatarHtml(rank, fallback = '') {
+  const title = rank?.title || rank?.league || '';
+  const logo = rank?.rank_logo_url || rank?.logo_url;
+  if (logo) {
+    return `<img class="rank-avatar" src="${escapeAttr(logo)}" alt="${escapeAttr(title || fallback)}" onerror="this.replaceWith(rankAvatarFallback(this.alt))">`;
+  }
+  const letter = String(title || fallback || 'И').trim().slice(0, 1).toUpperCase();
+  return `<span class="rank-avatar placeholder">${escapeHtml(letter)}</span>`;
+}
+
+function rankAvatarFallback(text = '') {
+  const span = document.createElement('span');
+  span.className = 'rank-avatar placeholder';
+  span.textContent = String(text || 'И').trim().slice(0, 1).toUpperCase();
+  return span;
 }
 
 function telegramFallbackName() {
@@ -992,31 +1015,33 @@ function renderProfileView() {
   const wallet = state.me?.wallet;
   if (!user || !wallet) return;
   const league = state.league?.current || {};
-  const nextTitle = league.next_title ? `До звания ${league.next_title}` : 'Максимальное звание';
+  const profileName = resolveProfileName(state.me);
+  const nextTitle = league.next_title ? `До ранга ${league.next_title}` : 'Максимальный ранг';
   const progress = Math.max(0, Math.min(100, Number(league.progress_percent || 0)));
   const content = `
     <div class="profile-rank-card">
-      <span>${escapeHtml(league.title || clientStatusLabels[user.client_status] || user.client_status || 'Новичок')}</span>
-      <strong>${moneyHtml(league.total_win || 0)}</strong>
-      <small>общий выигрыш</small>
+      <div class="profile-rank-head">
+        <span>${escapeHtml(league.title || clientStatusLabels[user.client_status] || user.client_status || 'Железо')}</span>
+        ${rankAvatarHtml(league, profileName)}
+      </div>
+      <small>Чистая прибыль</small>
+      <strong>${moneyHtml(league.total_profit || league.total_win || 0)}</strong>
       <div class="profile-progress"><i style="width:${progress}%"></i></div>
       <em>${escapeHtml(nextTitle)}: ${moneyHtml(league.remaining || 0)}</em>
     </div>
     <div class="profile-stats-grid">
-      <div class="profile-stat"><span>Баланс</span><strong>${moneyHtml(wallet.balance)}</strong></div>
-      <div class="profile-stat"><span>Лига</span><strong>${escapeHtml(league.league || league.title || 'Новичок')}</strong></div>
+      <div class="profile-stat"><span>Лига</span><strong>${escapeHtml(league.league || league.title || 'Железо')}</strong></div>
       <div class="profile-stat"><span>Крупнейший выигрыш</span><strong>${moneyHtml(league.biggest_win || 0)}</strong></div>
       <div class="profile-stat"><span>Крупнейший проигрыш</span><strong>${moneyHtml(league.biggest_loss || 0)}</strong></div>
       <div class="profile-stat"><span>Колесо</span><strong>${Number(league.wheel_spins_count || 0)}</strong></div>
       <div class="profile-stat"><span>Место</span><strong>${league.rank ? `#${league.rank}` : 'пока нет'}</strong></div>
     </div>
-    <div class="stat"><span>Username</span><strong>${escapeHtml(user.username || 'не указан')}</strong></div>
   `;
-  document.querySelector('#profile-view-name').textContent = resolveProfileName(state.me);
-  document.querySelector('#profile-view-balance').innerHTML = moneyHtml(wallet.balance);
+  document.querySelector('#profile-view-name').innerHTML = `${escapeHtml(profileName)}${rankAvatarHtml(league, profileName)}`;
+  document.querySelector('#profile-view-balance').innerHTML = `<span class="profile-balance-label">Текущий баланс</span>${moneyHtml(wallet.balance)}`;
   document.querySelector('#profile-view-info').innerHTML = content;
-  document.querySelector('#profile-card-name').textContent = resolveProfileName(state.me);
-  document.querySelector('#profile-card-balance').innerHTML = moneyHtml(wallet.balance);
+  document.querySelector('#profile-card-name').innerHTML = `${escapeHtml(profileName)}${rankAvatarHtml(league, profileName)}`;
+  document.querySelector('#profile-card-balance').innerHTML = `<span class="profile-balance-label">Текущий баланс</span>${moneyHtml(wallet.balance)}`;
   document.querySelector('#profile-card-info').innerHTML = content;
 }
 
@@ -1027,7 +1052,7 @@ async function loadLeague({ silent = false } = {}) {
   }
   state.league = await apiFetch('/api/league');
   renderLeague();
-  renderProfileView();
+  if (state.me) renderMe();
 }
 
 function renderLeague() {
@@ -1036,16 +1061,26 @@ function renderLeague() {
   const current = state.league.current || {};
   const rewards = state.league.rewards || [];
   const pendingWheels = state.league.pending_wheels || [];
-  const leaderboard = state.league.leaderboard || [];
+  const daily = state.league.daily_reward || {};
+  const maxThreshold = Math.max(...(state.league.tiers || []).map((tier) => Number(tier.threshold || 0)), 0);
   root.innerHTML = `
     <article class="league-hero-card">
       <p class="label">Лига</p>
       <div class="league-hero-title">
-        <h2>${escapeHtml(current.title || 'Новичок')}</h2>
-        <strong>${moneyHtml(current.total_win || 0)}</strong>
+        <h2>${escapeHtml(current.title || 'Железо')}</h2>
+        <strong>${moneyHtml(current.total_profit || current.total_win || 0)}</strong>
       </div>
       <div class="profile-progress league-progress"><i style="width:${Number(current.progress_percent || 0)}%"></i></div>
-      <p>${current.next_title ? `До звания ${escapeHtml(current.next_title)} осталось ${moneyHtml(current.remaining || 0)}` : 'Вы достигли максимального звания'}</p>
+      <div class="league-scale"><span>${moneyHtml(0)}</span><span>${moneyHtml(maxThreshold)}</span></div>
+      <p>${current.next_title ? `До ранга ${escapeHtml(current.next_title)} осталось ${moneyHtml(current.remaining || 0)}` : 'Вы достигли максимального ранга'}</p>
+    </article>
+    <article class="panel daily-panel ${daily.available ? 'claimable' : 'claimed'}">
+      <h2>Ежедневная награда</h2>
+      <p>Забирайте награду каждый день подряд. Если пропустить день, серия начнётся заново.</p>
+      <div class="daily-track">
+        ${(daily.rewards || []).map((item) => `<span class="${item.day === daily.next_day ? 'active' : ''}"><small>День ${item.day}</small><strong>${moneyHtml(item.stars)}</strong></span>`).join('')}
+      </div>
+      <button class="primary" id="claim-daily-reward" type="button" ${daily.available ? '' : 'disabled'}>${daily.available ? `Получить ${money(daily.amount)}` : 'Сегодня получено'}</button>
     </article>
     ${pendingWheels.length ? `
       <article class="panel wheel-panel">
@@ -1062,42 +1097,60 @@ function renderLeague() {
     ` : ''}
     <article class="panel">
       <h2>Шкала прогресса</h2>
+      <p class="league-description">Прогресс считается по чистой прибыли: выплата минус сумма ставки. Например, ставка ${money(1000)} с кэфом 1.50 даёт выплату ${money(1500)}, а в прогресс идёт ${money(500)}.</p>
       <div class="league-timeline">
         ${rewards.map(renderLeagueReward).join('')}
       </div>
     </article>
-    <article class="panel">
-      <h2>Высокие лиги</h2>
-      <div class="leaderboard-list">
-        ${leaderboard.length ? leaderboard.map((row) => `
-          <div class="leaderboard-row">
-            <span>#${row.rank}</span>
-            <strong>${escapeHtml(row.name)}</strong>
-            <em>${escapeHtml(row.title)}</em>
-            <b>${moneyHtml(row.total_win)}</b>
-          </div>
-        `).join('') : '<div class="empty-state">Игроков в высоких лигах пока нет.</div>'}
-      </div>
-    </article>
   `;
+  document.querySelector('#claim-daily-reward')?.addEventListener('click', claimDailyReward);
   root.querySelectorAll('[data-claim-reward]').forEach((button) => button.addEventListener('click', () => claimReward(Number(button.dataset.claimReward))));
   root.querySelectorAll('[data-spin-wheel]').forEach((button) => button.addEventListener('click', () => spinWheel(button.dataset.spinWheel)));
+  renderRating();
 }
 
 function renderLeagueReward(reward) {
   const parts = [];
-  if (reward.stars) parts.push(`${moneyHtml(reward.stars)} награда`);
+  if (reward.kind === 'rank') parts.push(`новый ранг ${escapeHtml(reward.title)}`);
+  if (reward.stars) parts.push(`награда ${moneyHtml(reward.stars)}`);
   if (reward.wheel_title) parts.push(escapeHtml(reward.wheel_title));
-  if (reward.title) parts.push(`звание ${escapeHtml(reward.title)}`);
   return `
     <div class="league-step ${reward.claimed ? 'claimed' : ''} ${reward.claimable ? 'claimable' : ''}">
       <div class="league-step-dot"></div>
       <div>
-        <strong>${moneyHtml(reward.threshold)}</strong>
+        <strong class="reward-threshold">${moneyHtml(reward.threshold)}</strong>
         <span>${parts.join(' · ')}</span>
       </div>
       ${reward.claimable ? `<button class="primary" data-claim-reward="${reward.threshold}" type="button">Получить</button>` : `<em>${reward.claimed ? 'Получено' : 'Закрыто'}</em>`}
     </div>
+  `;
+}
+
+function renderRating() {
+  const root = document.querySelector('#rating');
+  if (!root || !state.league) return;
+  const leaderboard = state.league.leaderboard || [];
+  root.innerHTML = `
+    <article class="league-hero-card">
+      <p class="label">Рейтинг</p>
+      <div class="league-hero-title">
+        <h2>Общий рейтинг</h2>
+        <strong>${leaderboard.length}</strong>
+      </div>
+      <p>Места считаются по чистой прибыли за всё время. Игроки с нулевой прибылью тоже участвуют.</p>
+    </article>
+    <article class="panel">
+      <div class="leaderboard-list">
+        ${leaderboard.length ? leaderboard.map((row) => `
+          <div class="leaderboard-row">
+            <span class="leaderboard-rank rank-${row.rank <= 3 ? row.rank : 'other'}">${row.rank}</span>
+            <strong>${rankAvatarHtml(row, row.name)}${escapeHtml(row.name)}</strong>
+            <em>${escapeHtml(row.title)}</em>
+            <b>${moneyHtml(row.total_profit ?? row.total_win ?? 0)}</b>
+          </div>
+        `).join('') : '<div class="empty-state">Рейтинг пока пуст.</div>'}
+      </div>
+    </article>
   `;
 }
 
@@ -1107,23 +1160,77 @@ async function claimReward(threshold) {
     state.league = await apiFetch(`/api/league/rewards/${threshold}/claim`, { method: 'POST', body: JSON.stringify({}) });
     await reloadMeSilently().catch(() => {});
     renderLeague();
-    notify('Награда получена', 'success');
+    showLoadingSuccess('Награда получена');
+    addSuccessConfetti(120);
+    await delay(2600);
+  } finally {
+    hideLoading();
+  }
+}
+
+async function claimDailyReward() {
+  showLoading('Ежедневная награда', 'Начисляю звёзды...');
+  try {
+    state.league = await apiFetch('/api/league/daily-reward/claim', { method: 'POST', body: JSON.stringify({}) });
+    await reloadMeSilently().catch(() => {});
+    renderLeague();
+    showLoadingSuccess('Награда получена');
+    addSuccessConfetti(120);
+    await delay(2600);
   } finally {
     hideLoading();
   }
 }
 
 async function spinWheel(spinId) {
-  showLoading('Колесо фортуны', 'Запускаю колесо...');
+  const spin = (state.league?.pending_wheels || []).find((item) => item.id === spinId);
+  const wheel = state.league?.wheels?.[spin?.wheel_type] || null;
+  showWheelLoading(wheel, spin);
   try {
     const result = await apiFetch(`/api/league/wheel-spins/${spinId}/spin`, { method: 'POST', body: JSON.stringify({}) });
+    await delay(1700);
     state.league = result.league;
     await reloadMeSilently().catch(() => {});
     renderLeague();
-    notify(`Выпало ${money(result.prize)}`, 'success');
+    finishWheelLoading(result.prize);
+    await delay(3600);
   } finally {
     hideLoading();
   }
+}
+
+function showWheelLoading(wheel, spin) {
+  showLoading(spin?.wheel_title || wheel?.title || 'Колесо фортуны', 'Колесо набирает скорость...');
+  const modal = document.querySelector('#loading-modal');
+  modal.classList.add('wheel-mode');
+  const card = modal.querySelector('.loading-card');
+  const segments = wheel?.segments || [];
+  const stage = document.createElement('div');
+  stage.className = 'wheel-stage';
+  stage.innerHTML = `
+    <div class="wheel-pointer"></div>
+    <div class="fortune-wheel">
+      ${segments.map((segment, index) => `<span style="--i:${index};--n:${Math.max(segments.length, 1)}">${moneyHtml(segment.stars)}</span>`).join('')}
+    </div>
+    <div class="wheel-prize" hidden></div>
+  `;
+  card.appendChild(stage);
+  tg?.HapticFeedback?.impactOccurred('light');
+  window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('medium'), 650);
+  window.setTimeout(() => tg?.HapticFeedback?.impactOccurred('light'), 1250);
+}
+
+function finishWheelLoading(prize) {
+  const modal = document.querySelector('#loading-modal');
+  modal.classList.add('wheel-finished');
+  document.querySelector('#loading-text').textContent = `Выпало ${money(prize)}`;
+  const prizeNode = modal.querySelector('.wheel-prize');
+  if (prizeNode) {
+    prizeNode.hidden = false;
+    prizeNode.innerHTML = moneyHtml(prize);
+  }
+  addSuccessConfetti(140);
+  triggerSuccessHaptics();
 }
 
 function closeProfileCard() {
@@ -1336,7 +1443,7 @@ function renderUsers() {
         <label>Username <input data-user-username="${user.id}" value="${escapeAttr(user.username || '')}" autocomplete="off"></label>
         <label>Имя <input data-user-first="${user.id}" value="${escapeAttr(user.first_name || '')}" autocomplete="off"></label>
         <label>Фамилия <input data-user-last="${user.id}" value="${escapeAttr(user.last_name || '')}" autocomplete="off"></label>
-        <div class="readonly-field"><span>Звание</span><strong>${escapeHtml(clientStatusLabels[user.client_status] || user.client_status || 'Новичок')}</strong></div>
+        <div class="readonly-field"><span>Ранг</span><strong>${escapeHtml(clientStatusLabels[user.client_status] || user.client_status || 'Железо')}</strong></div>
         <label>Баланс <input data-user-balance="${user.id}" type="number" min="0" step="10" value="${Number(wallet?.balance || 0)}"></label>
         <label class="checkbox-row"><input data-user-blocked="${user.id}" type="checkbox" ${user.is_blocked ? 'checked' : ''}> Заблокирован</label>
         <button class="primary" data-save-user="${user.id}">Сохранить</button>
@@ -2259,6 +2366,10 @@ function switchTab(tab) {
   document.querySelector(`#view-${tab}`).classList.add('active');
   if (tab === 'bets' || tab === 'history') loadBets().catch((error) => status(error.message));
   if (tab === 'league') loadLeague().catch((error) => status(error.message));
+  if (tab === 'rating') {
+    if (state.league) renderRating();
+    loadLeague({ silent: true }).catch((error) => status(error.message));
+  }
   if (tab === 'profile') {
     renderProfileView();
     loadLeague({ silent: true }).catch(() => {});

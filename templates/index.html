@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ app_name }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260508-league">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260508-league-daily-rating">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -66,6 +66,10 @@
         <div class="league-page" id="league"></div>
       </section>
 
+      <section class="view" id="view-rating">
+        <div class="league-page" id="rating"></div>
+      </section>
+
       <section class="view" id="view-profile">
         <article class="profile-page-card">
           <p class="label">Профиль</p>
@@ -100,6 +104,12 @@
           <svg viewBox="0 0 24 24"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M17 6h3a3 3 0 0 1-3 3"/><path d="M7 6H4a3 3 0 0 0 3 3"/></svg>
         </span>
         <span class="nav-label">Лига</span>
+      </button>
+      <button class="tab" data-tab="rating" type="button" aria-label="Рейтинг">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 19h16"/><path d="M7 16V9"/><path d="M12 16V5"/><path d="M17 16v-4"/></svg>
+        </span>
+        <span class="nav-label">Рейтинг</span>
       </button>
       <button class="tab" data-tab="profile" type="button" aria-label="Профиль">
         <span class="nav-icon" aria-hidden="true">
@@ -514,6 +524,6 @@
       </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}?v=20260508-league"></script>
+    <script src="{{ url_for('static', filename='app.js') }}?v=20260508-league-daily-rating"></script>
   </body>
 </html>

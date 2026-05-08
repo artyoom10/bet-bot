@@ -7,7 +7,7 @@ create table if not exists users (
   first_name text,
   last_name text,
   language_code text,
-  client_status text not null default 'Новичок',
+  client_status text not null default 'Железо',
   is_blocked boolean not null default false,
   block_reason text,
   is_admin boolean not null default false,
@@ -205,6 +205,36 @@ create table if not exists fortune_wheel_spins (
   spun_at timestamptz
 );
 
+create table if not exists league_rank_aliases (
+  title text primary key,
+  display_name text,
+  logo_url text,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists daily_login_rewards (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  reward_date date not null,
+  streak_day integer not null,
+  stars_amount numeric(18, 2) not null,
+  created_at timestamptz not null default now(),
+  unique(user_id, reward_date)
+);
+
+insert into league_rank_aliases(title, display_name)
+values
+  ('Железо', 'Железо'),
+  ('Бронза', 'Бронза'),
+  ('Серебро', 'Серебро'),
+  ('Золото', 'Золото'),
+  ('Платина', 'Платина'),
+  ('Изумруд', 'Изумруд'),
+  ('Сапфир', 'Сапфир'),
+  ('Рубин', 'Рубин'),
+  ('Алмаз', 'Алмаз')
+on conflict (title) do nothing;
+
 create table if not exists telegram_updates (
   update_id bigint primary key,
   payload jsonb not null,
@@ -286,6 +316,7 @@ create index if not exists idx_bet_selections_bet_id on bet_selections(bet_id);
 create index if not exists idx_wallet_transactions_related_bet on wallet_transactions(related_bet_id);
 create index if not exists idx_user_league_rewards_user on user_league_rewards(user_id, threshold);
 create index if not exists idx_fortune_wheel_spins_user on fortune_wheel_spins(user_id, status, created_at desc);
+create index if not exists idx_daily_login_rewards_user_date on daily_login_rewards(user_id, reward_date desc);
 create index if not exists idx_sync_runs_started_at on sync_runs(started_at desc);
 create index if not exists idx_odds_api_usage_created_at on odds_api_usage(created_at desc);
 create index if not exists idx_admin_logs_created_at on admin_logs(created_at desc);

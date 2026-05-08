@@ -15,7 +15,7 @@ from lib.bets import delete_admin_bet, get_user_bets, manual_settle_admin_bet, p
 from lib.config import SPORT_KEYS, admin_tg_ids, app_name
 from lib.errors import AppError, error_response
 from lib.events import default_sports, get_events_for_app, get_sports_for_app
-from lib.league import claim_league_reward, get_league_payload, spin_fortune_wheel
+from lib.league import claim_daily_reward, claim_league_reward, get_league_payload, spin_fortune_wheel
 from lib.odds_sync import refresh_odds_usage, run_odds_sync, sync_event_markets
 from lib.settlement import get_settlement_runs, manual_result_and_settle, settle_pending_bets, sync_scores_and_settle
 from lib.supabase_client import get_db
@@ -169,6 +169,14 @@ def api_spin_wheel(spin_id: str):
     user = current_user(db)
     ensure_active_user(user)
     return jsonify({"ok": True, **spin_fortune_wheel(db, user, spin_id)})
+
+
+@app.post("/api/league/daily-reward/claim")
+def api_claim_daily_reward():
+    db = get_db()
+    user = current_user(db)
+    ensure_active_user(user)
+    return jsonify({"ok": True, **claim_daily_reward(db, user)})
 
 
 @app.post("/api/bets")
@@ -622,7 +630,7 @@ def synthetic_user_from_tg(tg_user: dict[str, Any], is_admin: bool = False) -> d
         "username": tg_user.get("username"),
         "first_name": tg_user.get("first_name"),
         "last_name": tg_user.get("last_name"),
-        "client_status": "telegram_only",
+        "client_status": "Железо",
         "is_blocked": False,
         "is_admin": is_admin,
     }

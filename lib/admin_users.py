@@ -57,7 +57,7 @@ def create_admin_user(db: SupabaseRestClient, admin_user: dict[str, Any], payloa
                 "username": username or None,
                 "first_name": first_name,
                 "last_name": last_name,
-                "client_status": "Новичок",
+                "client_status": "Железо",
                 "is_admin": False,
             },
         )
@@ -178,7 +178,7 @@ def delete_admin_user(db: SupabaseRestClient, admin_user: dict[str, Any], user_i
         "username": None,
         "first_name": "Удаленный",
         "last_name": None,
-        "client_status": "Новичок",
+        "client_status": "Железо",
         "is_blocked": True,
         "block_reason": "deleted_by_admin",
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -206,6 +206,7 @@ def cleanup_user_dependencies(db: SupabaseRestClient, user_id: str) -> None:
 
     optional_delete(db, "fortune_wheel_spins", {"user_id": f"eq.{user_id}"})
     optional_delete(db, "user_league_rewards", {"user_id": f"eq.{user_id}"})
+    optional_delete(db, "daily_login_rewards", {"user_id": f"eq.{user_id}"})
     db.delete("wallet_transactions", {"user_id": f"eq.{user_id}"})
     db.delete("wallets", {"user_id": f"eq.{user_id}"})
 
